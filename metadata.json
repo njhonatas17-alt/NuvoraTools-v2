@@ -1,0 +1,8 @@
+{
+  "name": "Remix: NuvoraTools - Developer \u0026 Utility Tools",
+  "description": "A modern, fast, browser-based utility platform featuring AI invoice generation, QR code generator, password tools, converters, and calculators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

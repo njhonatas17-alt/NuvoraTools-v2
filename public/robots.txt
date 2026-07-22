@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://nuvoratools.dev/sitemap.xml

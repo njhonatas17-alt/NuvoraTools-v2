@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, system-ui, -apple-system, sans-serif;
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+  .dark body {
+    background-color: #090d16;
+    color: #f8fafc;
+  }
+}
