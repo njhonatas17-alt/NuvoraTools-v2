@@ -9,7 +9,7 @@ export default function QrCodeGenerator() {
   const [type, setType] = useState<QrType>('url');
   
   // Basic Inputs
-  const [url, setUrl] = useState('https://nuvoratools.dev');
+  const [url, setUrl] = useState('https://nuvoratools.com');
   const [text, setText] = useState('Hello from NuvoraTools QR Generator!');
   const [wifiSsid, setWifiSsid] = useState('MyHomeWifi');
   const [wifiPass, setWifiPass] = useState('SecretPass123');
@@ -60,7 +60,7 @@ export default function QrCodeGenerator() {
 
     QRCode.toCanvas(
       canvasRef.current,
-      payload || 'https://nuvoratools.dev',
+      payload || 'https://nuvoratools.com',
       {
         width: size,
         margin: 2,
