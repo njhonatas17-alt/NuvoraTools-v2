@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { jsPDF } from 'jspdf';
 import {
   Sparkles,
@@ -24,10 +24,25 @@ import {
   Building2,
   Layers,
   Wrench,
-  Image as ImageIcon,
   Check,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
+  FileSpreadsheet,
+  FileJson,
+  Eye,
+  Edit3,
+  Globe,
+  Share2,
+  DollarSign,
+  Percent,
+  Tag,
+  Calendar,
+  CreditCard,
+  UserCheck,
+  ShieldCheck,
 } from 'lucide-react';
-import { triggerConfetti } from '../lib/utils';
+import { triggerConfetti, copyToClipboard } from '../lib/utils';
 
 export interface InvoiceItem {
   id: string;
@@ -37,22 +52,32 @@ export interface InvoiceItem {
 }
 
 export interface InvoiceData {
+  status: 'draft' | 'pending' | 'paid' | 'overdue';
   senderName: string;
   senderEmail: string;
   senderAddress: string;
+  senderTaxId: string;
   clientName: string;
   clientEmail: string;
   clientAddress: string;
+  clientTaxId: string;
   numberPrefix: string;
   sequenceNumber: number;
   invoiceDate: string;
   dueDate: string;
   currency: string;
+  currencySymbol: string;
   taxRate: number;
+  taxLabel: string;
   discount: number;
+  discountType: 'percentage' | 'fixed';
+  shipping: number;
   notes: string;
+  paymentInstructions: string;
   items: InvoiceItem[];
   logoUrl: string | null;
+  logoSize: 'sm' | 'md' | 'lg';
+  themeColor: 'indigo' | 'navy' | 'emerald' | 'sky' | 'slate' | 'rose';
 }
 
 export interface SavedInvoice {
@@ -62,258 +87,225 @@ export interface SavedInvoice {
   data: InvoiceData;
 }
 
-const TEMPLATES: Record<
-  string,
-  {
-    name: string;
-    icon: React.ReactNode;
-    description: string;
-    senderName: string;
-    senderEmail: string;
-    senderAddress: string;
-    clientName: string;
-    clientEmail: string;
-    clientAddress: string;
-    currency: string;
-    taxRate: number;
-    discount: number;
-    notes: string;
-    items: Array<{ description: string; quantity: number; unitPrice: number }>;
-  }
-> = {
+const CURRENCY_MAP: Record<string, string> = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  BRL: 'R$',
+  CAD: 'CA$',
+  AUD: 'A$',
+  JPY: '¥',
+  INR: '₹',
+  CHF: 'CHF',
+  MXN: 'MEX$',
+};
+
+const THEME_COLORS: Record<InvoiceData['themeColor'], { primary: string; text: string; bg: string; border: string; hex: string }> = {
+  indigo: { primary: 'bg-indigo-600', text: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-600', hex: '#4f46e5' },
+  navy: { primary: 'bg-slate-800', text: 'text-slate-800', bg: 'bg-slate-100', border: 'border-slate-800', hex: '#1e293b' },
+  emerald: { primary: 'bg-emerald-600', text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-600', hex: '#059669' },
+  sky: { primary: 'bg-sky-600', text: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-600', hex: '#0284c7' },
+  slate: { primary: 'bg-slate-700', text: 'text-slate-700', bg: 'bg-slate-100', border: 'border-slate-700', hex: '#334155' },
+  rose: { primary: 'bg-rose-600', text: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-600', hex: '#e11d48' },
+};
+
+const SAMPLE_PROMPTS = [
+  'Invoice John Smith $2500 for Nursing Services',
+  'Invoice Acme Ltd 18 hours React Development at $80/hour',
+  'Bill Maria Silva R$3500 Website Design',
+  'Invoice Carlos for Logo Design $500 with 10% tax',
+  'Invoice ABC Company €1200 Marketing Consulting',
+];
+
+const TEMPLATES: Record<string, { name: string; icon: React.ReactNode; description: string; data: Partial<InvoiceData> }> = {
   freelancer: {
-    name: 'Freelancer',
-    icon: <Briefcase className="w-3.5 h-3.5 text-blue-500" />,
-    description: 'UI/UX Design & Frontend Development Services',
-    senderName: 'Alex Rivera — Independent Designer',
-    senderEmail: 'alex@riveradesign.io',
-    senderAddress: '742 Evergreen Terrace, Portland, OR 97201',
-    clientName: 'Starlight Tech Solutions',
-    clientEmail: 'accounts@starlighttech.com',
-    clientAddress: '100 Innovation Way, Suite 400, San Francisco, CA 94105',
-    currency: 'USD',
-    taxRate: 8.5,
-    discount: 0,
-    notes: 'Payment is due within 14 days via bank transfer or Stripe. Thank you for your business!',
-    items: [
-      { description: 'Mobile App Wireframing & UI/UX Design System', quantity: 1, unitPrice: 1800 },
-      { description: 'Frontend React & Tailwind Integration (hrs)', quantity: 20, unitPrice: 85 },
-    ],
-  },
-  consultant: {
-    name: 'Consultant',
-    icon: <Building2 className="w-3.5 h-3.5 text-purple-500" />,
-    description: 'Strategic Business & Technology Advisory',
-    senderName: 'Apex Business Advisory Group',
-    senderEmail: 'billing@apexadvisory.com',
-    senderAddress: '500 Corporate Parkway, New York, NY 10001',
-    clientName: 'Vanguard Capital Partners',
-    clientEmail: 'finance@vanguardcap.com',
-    clientAddress: '250 Financial Center, Chicago, IL 60601',
-    currency: 'USD',
-    taxRate: 0,
-    discount: 5,
-    notes: 'Net 30 payment terms. Please reference invoice number on wire transfer confirmation.',
-    items: [
-      { description: 'Q3 Enterprise Digital Transformation Roadmap', quantity: 1, unitPrice: 3500 },
-      { description: 'Executive Leadership Strategy Workshop & Audit', quantity: 4, unitPrice: 250 },
-    ],
+    name: 'Freelance Tech',
+    icon: <Briefcase className="w-3.5 h-3.5 text-indigo-500" />,
+    description: 'UI/UX Design & Development Services',
+    data: {
+      senderName: 'Alex Rivera Design',
+      senderEmail: 'alex@riveradesign.io',
+      senderAddress: '742 Evergreen Terrace, Portland, OR 97201',
+      senderTaxId: 'EIN-98-7654321',
+      clientName: 'Starlight Tech Solutions',
+      clientEmail: 'billing@starlighttech.com',
+      clientAddress: '100 Innovation Way, Suite 400, San Francisco, CA 94105',
+      currency: 'USD',
+      currencySymbol: '$',
+      taxRate: 8.5,
+      taxLabel: 'Sales Tax',
+      discount: 0,
+      discountType: 'percentage',
+      shipping: 0,
+      paymentInstructions: 'Bank Transfer: Chase Bank | Routing: 123456789 | Account: 987654321',
+      notes: 'Payment is due within 14 days. Thank you for your business!',
+      items: [
+        { id: '1', description: 'Mobile App Wireframing & UI/UX Design System', quantity: 1, unitPrice: 1800 },
+        { id: '2', description: 'Frontend React & Tailwind Integration (hrs)', quantity: 20, unitPrice: 85 },
+      ],
+    },
   },
   agency: {
-    name: 'Agency',
-    icon: <Layers className="w-3.5 h-3.5 text-indigo-500" />,
-    description: 'Full-Service Digital Marketing & Creative Agency',
-    senderName: 'Nexus Creative Digital Agency',
-    senderEmail: 'finance@nexuscreative.agency',
-    senderAddress: '120 Market Street, 8th Floor, Austin, TX 78701',
-    clientName: 'Horizon Brands Inc.',
-    clientEmail: 'ap@horizonbrands.com',
-    clientAddress: '88 Commerce Blvd, Seattle, WA 98101',
-    currency: 'USD',
-    taxRate: 10,
-    discount: 0,
-    notes: 'Thank you for partnering with Nexus. Late payments subject to 1.5% monthly late fee.',
-    items: [
-      { description: 'Q3 Omni-channel Marketing Campaign Strategy', quantity: 1, unitPrice: 4200 },
-      { description: 'Social Media Content Asset Creation & Copy', quantity: 1, unitPrice: 1800 },
-      { description: 'SEO Optimization & Technical Site Performance', quantity: 1, unitPrice: 1200 },
-    ],
+    name: 'Digital Agency',
+    icon: <Building2 className="w-3.5 h-3.5 text-purple-500" />,
+    description: 'Full-Service Marketing & Branding',
+    data: {
+      senderName: 'Nexus Creative Digital Agency',
+      senderEmail: 'finance@nexuscreative.agency',
+      senderAddress: '120 Market Street, 8th Floor, Austin, TX 78701',
+      senderTaxId: 'TAX-11-2233445',
+      clientName: 'Horizon Brands Inc.',
+      clientEmail: 'ap@horizonbrands.com',
+      clientAddress: '88 Commerce Blvd, Seattle, WA 98101',
+      currency: 'USD',
+      currencySymbol: '$',
+      taxRate: 10,
+      taxLabel: 'VAT',
+      discount: 5,
+      discountType: 'percentage',
+      shipping: 0,
+      paymentInstructions: 'ACH / Wire Transfer: Silicon Valley Bank | Swift: SVBKUS6S',
+      notes: 'Net 30 payment terms. Reference invoice number on wire transfer confirmation.',
+      items: [
+        { id: '1', description: 'Q3 Omni-channel Marketing Campaign Strategy', quantity: 1, unitPrice: 4200 },
+        { id: '2', description: 'Social Media Content Asset Creation & Copywriting', quantity: 1, unitPrice: 1800 },
+        { id: '3', description: 'SEO Technical Site Performance Audit', quantity: 1, unitPrice: 1200 },
+      ],
+    },
   },
-  contractor: {
-    name: 'Contractor',
-    icon: <Wrench className="w-3.5 h-3.5 text-amber-500" />,
-    description: 'General Contracting & Site Engineering Services',
-    senderName: 'Summit Construction Services LLC',
-    senderEmail: 'invoices@summitbuilds.com',
-    senderAddress: '410 Industrial Park Road, Denver, CO 80202',
-    clientName: 'Pinnacle Commercial Properties',
-    clientEmail: 'projects@pinnacleprop.com',
-    clientAddress: '1200 Main Street, Suite 300, Denver, CO 80202',
-    currency: 'USD',
-    taxRate: 7.25,
-    discount: 0,
-    notes: 'Payment due upon site inspection & milestone sign-off.',
-    items: [
-      { description: 'Commercial Interior Framing & Structural Prep', quantity: 1, unitPrice: 4800 },
-      { description: 'Electrical & Plumbing Prep Operations', quantity: 1, unitPrice: 2200 },
-    ],
+  brazil_service: {
+    name: 'Serviços (Brasil)',
+    icon: <Globe className="w-3.5 h-3.5 text-emerald-500" />,
+    description: 'Design, Código & Consultoria em R$',
+    data: {
+      senderName: 'Maria Silva Desenvolvimento LTDA',
+      senderEmail: 'financeiro@mariasilva.dev',
+      senderAddress: 'Av. Paulista, 1000, Cj 42 - São Paulo, SP',
+      senderTaxId: 'CNPJ: 12.345.678/0001-90',
+      clientName: 'Acme Brasil Soluções Tecnológicas',
+      clientEmail: 'contato@acmebrasil.com.br',
+      clientAddress: 'Rua das Flores, 500 - Rio de Janeiro, RJ',
+      currency: 'BRL',
+      currencySymbol: 'R$',
+      taxRate: 5,
+      taxLabel: 'ISS',
+      discount: 0,
+      discountType: 'percentage',
+      shipping: 0,
+      paymentInstructions: 'PIX Chave CNPJ: 12.345.678/0001-90 | Banco Itaú Ag 0123 C/C 45678-9',
+      notes: 'Pagamento em até 10 dias via PIX ou Transferência Bancária. Agradecemos a preferência!',
+      items: [
+        { id: '1', description: 'Desenvolvimento de Website Responsivo & PWA', quantity: 1, unitPrice: 3500 },
+        { id: '2', description: 'Otimização de SEO e Velocidade de Carregamento', quantity: 1, unitPrice: 800 },
+      ],
+    },
   },
-  smallbusiness: {
-    name: 'Small Business',
-    icon: <Building2 className="w-3.5 h-3.5 text-emerald-500" />,
-    description: 'Wholesale Orders & Merchandise Distribution',
-    senderName: 'Artisan Crafted Goods Co.',
-    senderEmail: 'orders@artisangoods.shop',
-    senderAddress: '305 Heritage Lane, Nashville, TN 37201',
-    clientName: 'Boutique Collection Store',
-    clientEmail: 'purchasing@boutiquecollect.com',
-    clientAddress: '55 Retail Square, Atlanta, GA 30301',
-    currency: 'USD',
-    taxRate: 9.5,
-    discount: 10,
-    notes: 'Items dispatched via Express Shipping. Returns accepted within 30 days of receipt.',
-    items: [
-      { description: 'Handcrafted Ceramic Vessel Sets (Batch A)', quantity: 25, unitPrice: 45 },
-      { description: 'Organic Cotton Table Linen Bundles', quantity: 15, unitPrice: 60 },
-      { description: 'Freight Cargo & Logistics Handling', quantity: 1, unitPrice: 150 },
-    ],
-  },
-  photographer: {
-    name: 'Photographer',
-    icon: <Camera className="w-3.5 h-3.5 text-rose-500" />,
-    description: 'Event, Commercial & Portrait Photography',
-    senderName: 'Lumina Photography Studio',
-    senderEmail: 'booking@luminaphoto.com',
-    senderAddress: '88 Studio Alley, Los Angeles, CA 90012',
-    clientName: 'Elevate Lifestyle Magazine',
-    clientEmail: 'editor@elevatemag.com',
-    clientAddress: '450 Wilshire Blvd, Los Angeles, CA 90036',
-    currency: 'USD',
-    taxRate: 0,
-    discount: 0,
-    notes: 'High-resolution digital gallery download link provided upon settlement of invoice.',
-    items: [
-      { description: 'Half-Day Commercial Fashion Shoot Session', quantity: 1, unitPrice: 1400 },
-      { description: 'High-Res Photo Color Grading & Retouching', quantity: 20, unitPrice: 30 },
-      { description: 'Commercial Image Publishing License', quantity: 1, unitPrice: 600 },
-    ],
-  },
-  designer: {
-    name: 'Designer',
-    icon: <Palette className="w-3.5 h-3.5 text-pink-500" />,
-    description: 'Brand Identity, Graphic & Vector Design',
-    senderName: 'Studio Chroma Design',
-    senderEmail: 'hello@studiochroma.design',
-    senderAddress: '92 Creative Way, Brooklyn, NY 11201',
-    clientName: 'Pulse Fitness & Wellness',
-    clientEmail: 'team@pulsefitness.com',
-    clientAddress: '180 Broadway, New York, NY 10038',
-    currency: 'USD',
-    taxRate: 8.875,
-    discount: 0,
-    notes: 'Vector brand assets (.AI, .SVG, .PDF) will be transferred upon final invoice settlement.',
-    items: [
-      { description: 'Complete Brand Identity System & Logo Suite', quantity: 1, unitPrice: 3200 },
-      { description: 'Brand Style Guidelines & Typography Deck', quantity: 1, unitPrice: 950 },
-    ],
-  },
-  developer: {
-    name: 'Developer',
-    icon: <Code2 className="w-3.5 h-3.5 text-teal-500" />,
-    description: 'Software Engineering, API Architecture & DevOps',
-    senderName: 'DevCraft Software Engineering',
-    senderEmail: 'dev@devcraft.io',
-    senderAddress: '600 Tech Boulevard, Austin, TX 78702',
-    clientName: 'DataSphere Cloud Inc.',
-    clientEmail: 'billing@datasphere.cloud',
-    clientAddress: '101 Cloud Way, San Jose, CA 95110',
-    currency: 'USD',
-    taxRate: 0,
-    discount: 0,
-    notes: 'Source code deployed to staging. Production deployment scheduled immediately upon payment.',
-    items: [
-      { description: 'REST API & GraphQL Middleware Architecture (hrs)', quantity: 30, unitPrice: 110 },
-      { description: 'Docker Containerization & CI/CD Pipeline Setup', quantity: 1, unitPrice: 1500 },
-      { description: 'Automated Test Suite & Database Optimization', quantity: 1, unitPrice: 950 },
-    ],
+  europe_consulting: {
+    name: 'EU Consulting',
+    icon: <Layers className="w-3.5 h-3.5 text-sky-500" />,
+    description: 'Strategy & Enterprise Advisory in €',
+    data: {
+      senderName: 'Apex Advisory Group Europe B.V.',
+      senderEmail: 'invoices@apexadvisory.eu',
+      senderAddress: 'Keizersgracht 421, 1016 EK Amsterdam, Netherlands',
+      senderTaxId: 'VAT: NL812345678B01',
+      clientName: 'Vanguard Capital Partners GmbH',
+      clientEmail: 'accounting@vanguardcap.de',
+      clientAddress: 'Taunusanlage 8, 60329 Frankfurt am Main, Germany',
+      currency: 'EUR',
+      currencySymbol: '€',
+      taxRate: 21,
+      taxLabel: 'VAT (BTW)',
+      discount: 0,
+      discountType: 'percentage',
+      shipping: 0,
+      paymentInstructions: 'IBAN: NL91 ABNA 0412 3456 78 | BIC/SWIFT: ABNANL2A',
+      notes: 'Payment terms: Net 14 days upon receipt of invoice.',
+      items: [
+        { id: '1', description: 'Enterprise Digital Transformation Strategy Roadmap', quantity: 1, unitPrice: 5000 },
+        { id: '2', description: 'Executive Leadership Workshop & Security Audit', quantity: 8, unitPrice: 250 },
+      ],
+    },
   },
 };
 
-const EMPTY_INVOICE: InvoiceData = {
-  senderName: '',
-  senderEmail: '',
-  senderAddress: '',
-  clientName: '',
-  clientEmail: '',
-  clientAddress: '',
+const DEFAULT_INVOICE: InvoiceData = {
+  status: 'pending',
+  senderName: 'Nuvora Studio',
+  senderEmail: 'billing@nuvoratools.com',
+  senderAddress: '100 Tech Plaza, San Francisco, CA 94105',
+  senderTaxId: 'Tax ID / EIN: 98-7654321',
+  clientName: 'Global Client Inc.',
+  clientEmail: 'accounts@clientcorp.com',
+  clientAddress: '500 Market Street, Suite 200, New York, NY 10001',
+  clientTaxId: '',
   numberPrefix: 'INV-',
-  sequenceNumber: 1001,
+  sequenceNumber: 1084,
   invoiceDate: new Date().toISOString().split('T')[0],
   dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
   currency: 'USD',
-  taxRate: 0,
+  currencySymbol: '$',
+  taxRate: 10,
+  taxLabel: 'Tax / VAT',
   discount: 0,
-  notes: '',
-  items: [{ id: '1', description: '', quantity: 1, unitPrice: 0 }],
+  discountType: 'percentage',
+  shipping: 0,
+  notes: 'Thank you for your business! Payment is due within 14 days of receipt.',
+  paymentInstructions: 'Bank Transfer | ACH Routing: 123456789 | Account: 987654321',
+  items: [
+    { id: '1', description: 'Professional Software Development & Architecture', quantity: 20, unitPrice: 85 },
+    { id: '2', description: 'UI/UX Interactive System Design & Wireframing', quantity: 1, unitPrice: 800 },
+  ],
   logoUrl: null,
+  logoSize: 'md',
+  themeColor: 'indigo',
 };
-
-const SAMPLE_INVOICE: InvoiceData = { ...TEMPLATES.freelancer, numberPrefix: 'INV-', sequenceNumber: 1084, invoiceDate: new Date().toISOString().split('T')[0], dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], items: TEMPLATES.freelancer.items.map((it, idx) => ({ ...it, id: String(idx + 1) })), logoUrl: null };
 
 export default function AiInvoiceGenerator() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonInputRef = useRef<HTMLInputElement>(null);
 
   // Core State
   const [data, setData] = useState<InvoiceData>(() => {
     try {
-      const savedDraft = localStorage.getItem('nuvoratools_invoice_draft') || localStorage.getItem('toolhub_invoice_draft');
+      const savedDraft = localStorage.getItem('nuvoratools_invoice_draft');
       if (savedDraft) {
         const parsed = JSON.parse(savedDraft);
-        if (parsed && typeof parsed === 'object') return parsed;
+        if (parsed && typeof parsed === 'object') return { ...DEFAULT_INVOICE, ...parsed };
       }
-    } catch (e) {
-      // Ignore
+    } catch {
+      // fallback
     }
-    return EMPTY_INVOICE;
+    return DEFAULT_INVOICE;
   });
 
-  // History State for Undo / Redo
+  // Undo / Redo History
   const [history, setHistory] = useState<InvoiceData[]>([data]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
-  // UI State
+  // UI States
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiSuccessMsg, setAiSuccessMsg] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
-  const [savedInvoicesModalOpen, setSavedInvoicesModalOpen] = useState(false);
+  const [savedModalOpen, setSavedModalOpen] = useState(false);
   const [savedInvoices, setSavedInvoices] = useState<SavedInvoice[]>([]);
   const [saveTitle, setSaveTitle] = useState('');
-  const [isDragging, setIsDragging] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
-
-  const currencySymbols: Record<string, string> = {
-    USD: '$',
-    EUR: '€',
-    GBP: '£',
-    CAD: 'CA$',
-    AUD: 'A$',
-    BRL: 'R$',
-    JPY: '¥',
-    INR: '₹',
-  };
-
-  const currentSymbol = currencySymbols[data.currency] || '$';
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [mobileTab, setMobileTab] = useState<'editor' | 'preview' | 'history'>('editor');
+  const [historySearch, setHistorySearch] = useState('');
+  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
 
   // Load saved invoices from localStorage
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('nuvoratools_saved_invoices') || localStorage.getItem('toolhub_saved_invoices');
+      const stored = localStorage.getItem('nuvoratools_saved_invoices');
       if (stored) {
         setSavedInvoices(JSON.parse(stored));
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading saved invoices:', e);
     }
   }, []);
 
@@ -322,23 +314,25 @@ export default function AiInvoiceGenerator() {
     try {
       localStorage.setItem('nuvoratools_invoice_draft', JSON.stringify(data));
     } catch (e) {
-      console.error(e);
+      console.error('Error saving draft:', e);
     }
   }, [data]);
 
-  // Helper to push state to Undo/Redo history
-  const updateData = (newData: InvoiceData | ((prev: InvoiceData) => InvoiceData)) => {
+  // Update Data Helper with History Recording
+  const updateData = useCallback((newData: InvoiceData | ((prev: InvoiceData) => InvoiceData)) => {
     setData((prev) => {
       const next = typeof newData === 'function' ? newData(prev) : newData;
-      const newHistory = history.slice(0, historyIndex + 1);
-      newHistory.push(next);
-      if (newHistory.length > 20) newHistory.shift(); // keep max 20
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
+      setHistory((oldHist) => {
+        const sliced = oldHist.slice(0, historyIndex + 1);
+        const updated = [...sliced, next];
+        if (updated.length > 25) updated.shift();
+        setHistoryIndex(updated.length - 1);
+        return updated;
+      });
       return next;
     });
-    setValidationError(null);
-  };
+    setValidationErrors({});
+  }, [historyIndex]);
 
   const undo = () => {
     if (historyIndex > 0) {
@@ -356,68 +350,98 @@ export default function AiInvoiceGenerator() {
     }
   };
 
+  // Calculations (100% Real-time & Accurate)
+  const subtotal = useMemo(() => {
+    return data.items.reduce((sum, item) => {
+      const q = Number(item.quantity) || 0;
+      const p = Number(item.unitPrice) || 0;
+      return sum + Math.round(q * p * 100) / 100;
+    }, 0);
+  }, [data.items]);
+
+  const discountAmount = useMemo(() => {
+    if (!data.discount || data.discount <= 0) return 0;
+    if (data.discountType === 'percentage') {
+      return Math.round(((subtotal * data.discount) / 100) * 100) / 100;
+    }
+    return Math.min(subtotal, Math.round(data.discount * 100) / 100);
+  }, [subtotal, data.discount, data.discountType]);
+
+  const taxableBase = useMemo(() => {
+    return Math.max(0, subtotal - discountAmount);
+  }, [subtotal, discountAmount]);
+
+  const taxAmount = useMemo(() => {
+    if (!data.taxRate || data.taxRate <= 0) return 0;
+    return Math.round(((taxableBase * data.taxRate) / 100) * 100) / 100;
+  }, [taxableBase, data.taxRate]);
+
+  const shippingAmount = useMemo(() => {
+    return Math.max(0, Number(data.shipping) || 0);
+  }, [data.shipping]);
+
+  const grandTotal = useMemo(() => {
+    return Math.max(0, Math.round((taxableBase + taxAmount + shippingAmount) * 100) / 100);
+  }, [taxableBase, taxAmount, shippingAmount]);
+
   const fullInvoiceNumber = `${data.numberPrefix}${data.sequenceNumber}`;
 
-  const calculateSubtotal = () => {
-    return data.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice || 0), 0);
-  };
-
-  const subtotal = calculateSubtotal();
-  const taxAmount = (subtotal * (data.taxRate || 0)) / 100;
-  const discountAmount = (subtotal * (data.discount || 0)) / 100;
-  const grandTotal = subtotal + taxAmount - discountAmount;
-
   // Form Validation
-  const validateInvoice = (): boolean => {
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
     if (!data.senderName.trim()) {
-      setValidationError('Please enter your Sender Business / Name.');
-      return false;
+      errors.senderName = 'Sender Business or Full Name is required';
     }
     if (!data.clientName.trim()) {
-      setValidationError('Please enter the Client Name.');
-      return false;
+      errors.clientName = 'Client Name is required';
     }
-    if (data.items.length === 0 || !data.items.some((it) => it.description.trim())) {
-      setValidationError('Please add at least one line item with a description.');
-      return false;
+    if (data.items.length === 0) {
+      errors.items = 'At least one line item is required';
+    } else {
+      data.items.forEach((item, idx) => {
+        if (!item.description.trim()) {
+          errors[`item_${idx}`] = 'Item description cannot be empty';
+        }
+      });
     }
-    setValidationError(null);
-    return true;
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   // Actions
   const handleClearAll = () => {
-    updateData(EMPTY_INVOICE);
-    setValidationError(null);
-    setAiSuccessMsg('All invoice fields cleared.');
+    updateData({
+      ...DEFAULT_INVOICE,
+      senderName: '',
+      senderEmail: '',
+      senderAddress: '',
+      senderTaxId: '',
+      clientName: '',
+      clientEmail: '',
+      clientAddress: '',
+      clientTaxId: '',
+      notes: '',
+      paymentInstructions: '',
+      items: [{ id: Date.now().toString(), description: '', quantity: 1, unitPrice: 0 }],
+      logoUrl: null,
+    });
+    setAiSuccessMsg('Cleared all invoice fields.');
   };
 
-  const handleLoadSample = () => {
-    updateData(SAMPLE_INVOICE);
-    triggerConfetti();
-    setAiSuccessMsg('Loaded realistic sample invoice data.');
-  };
-
-  const handleApplyTemplate = (templateKey: string) => {
-    const tmpl = TEMPLATES[templateKey];
+  const handleApplyTemplate = (tmplKey: string) => {
+    const tmpl = TEMPLATES[tmplKey];
     if (!tmpl) return;
-
     updateData((prev) => ({
       ...prev,
-      senderName: tmpl.senderName,
-      senderEmail: tmpl.senderEmail,
-      senderAddress: tmpl.senderAddress,
-      clientName: tmpl.clientName,
-      clientEmail: tmpl.clientEmail,
-      clientAddress: tmpl.clientAddress,
-      currency: tmpl.currency,
-      taxRate: tmpl.taxRate,
-      discount: tmpl.discount,
-      notes: tmpl.notes,
-      items: tmpl.items.map((it, idx) => ({ ...it, id: Date.now().toString() + idx })),
+      ...tmpl.data,
+      sequenceNumber: prev.sequenceNumber,
+      invoiceDate: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      items: (tmpl.data.items || []).map((it, idx) => ({ ...it, id: `${Date.now()}_${idx}` })),
     }));
     triggerConfetti();
-    setAiSuccessMsg(`Applied ${tmpl.name} template.`);
+    setAiSuccessMsg(`Applied "${tmpl.name}" template.`);
   };
 
   const handleDuplicate = () => {
@@ -431,13 +455,7 @@ export default function AiInvoiceGenerator() {
     setAiSuccessMsg(`Invoice duplicated! Generated new number: ${data.numberPrefix}${data.sequenceNumber + 1}`);
   };
 
-  const handleIncrementNumber = () => {
-    updateData((prev) => ({
-      ...prev,
-      sequenceNumber: prev.sequenceNumber + 1,
-    }));
-  };
-
+  // Line Item Operations
   const addItem = () => {
     updateData((prev) => ({
       ...prev,
@@ -445,30 +463,67 @@ export default function AiInvoiceGenerator() {
     }));
   };
 
+  const duplicateItem = (index: number) => {
+    const itemToDup = data.items[index];
+    if (!itemToDup) return;
+    const newItem = { ...itemToDup, id: Date.now().toString() };
+    const updated = [...data.items];
+    updated.splice(index + 1, 0, newItem);
+    updateData((prev) => ({ ...prev, items: updated }));
+  };
+
   const removeItem = (id: string) => {
     if (data.items.length <= 1) return;
     updateData((prev) => ({
       ...prev,
-      items: prev.items.filter((item) => item.id !== id),
+      items: prev.items.filter((it) => it.id !== id),
     }));
   };
 
   const updateItem = (id: string, field: keyof InvoiceItem, value: string | number) => {
     updateData((prev) => ({
       ...prev,
-      items: prev.items.map((item) => {
-        if (item.id === id) {
-          return { ...item, [field]: value };
-        }
-        return item;
-      }),
+      items: prev.items.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
     }));
   };
 
-  // Logo Upload & Drag and Drop
+  const moveItem = (index: number, direction: 'up' | 'down') => {
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= data.items.length) return;
+    const updated = [...data.items];
+    const [moved] = updated.splice(index, 1);
+    updated.splice(targetIdx, 0, moved);
+    updateData((prev) => ({ ...prev, items: updated }));
+  };
+
+  // HTML5 Drag and Drop Handlers for Reordering
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedItemIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedItemIndex === null || draggedItemIndex === index) return;
+    const updated = [...data.items];
+    const [dragged] = updated.splice(draggedItemIndex, 1);
+    updated.splice(index, 0, dragged);
+    setDraggedItemIndex(index);
+    updateData((prev) => ({ ...prev, items: updated }));
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItemIndex(null);
+  };
+
+  // Logo Upload & Handling
   const handleLogoFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file (PNG, JPG, SVG, WebP).');
+      alert('Please upload a valid image file (PNG, JPG, SVG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Logo image size must be under 5MB.');
       return;
     }
     const reader = new FileReader();
@@ -481,16 +536,17 @@ export default function AiInvoiceGenerator() {
 
   const handleLogoDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragging(false);
+    setIsDraggingLogo(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleLogoFile(e.dataTransfer.files[0]);
     }
   };
 
-  // AI Fill
-  const handleAiSmartFill = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!prompt.trim()) return;
+  // AI Smart Fill Form Submit
+  const handleAiSmartFill = async (e?: React.FormEvent, customPrompt?: string) => {
+    if (e) e.preventDefault();
+    const query = customPrompt || prompt;
+    if (!query.trim()) return;
 
     setIsGenerating(true);
     setAiSuccessMsg('');
@@ -498,81 +554,132 @@ export default function AiInvoiceGenerator() {
       const res = await fetch('/api/generate-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: query }),
       });
       const resData = await res.json();
       if (resData.success && resData.data) {
         const d = resData.data;
+        const newCurrency = d.currency && CURRENCY_MAP[d.currency] ? d.currency : data.currency;
+        const newSymbol = CURRENCY_MAP[newCurrency] || data.currencySymbol;
+
         updateData((prev) => ({
           ...prev,
-          senderName: d.senderName || prev.senderName,
-          senderEmail: d.senderEmail || prev.senderEmail,
-          senderAddress: d.senderAddress || prev.senderAddress,
           clientName: d.clientName || prev.clientName,
           clientEmail: d.clientEmail || prev.clientEmail,
           clientAddress: d.clientAddress || prev.clientAddress,
-          currency: d.currency && currencySymbols[d.currency] ? d.currency : prev.currency,
+          senderName: d.senderName || prev.senderName,
+          senderEmail: d.senderEmail || prev.senderEmail,
+          senderAddress: d.senderAddress || prev.senderAddress,
+          currency: newCurrency,
+          currencySymbol: newSymbol,
           taxRate: typeof d.taxRate === 'number' ? d.taxRate : prev.taxRate,
           discount: typeof d.discount === 'number' ? d.discount : prev.discount,
           notes: d.notes || prev.notes,
+          invoiceDate: d.invoiceDate || prev.invoiceDate,
+          dueDate: d.dueDate || prev.dueDate,
           items:
             Array.isArray(d.items) && d.items.length > 0
               ? d.items.map((it: any, idx: number) => ({
-                  id: idx.toString() + Date.now(),
+                  id: `${Date.now()}_${idx}`,
                   description: it.description || 'Service Item',
                   quantity: Number(it.quantity) || 1,
                   unitPrice: Number(it.unitPrice) || 100,
                 }))
               : prev.items,
         }));
-        setAiSuccessMsg('Invoice generated & populated from prompt!');
+        setAiSuccessMsg('Parsed and auto-filled invoice data with AI!');
         triggerConfetti();
+      } else {
+        alert('Could not parse invoice prompt. Please try again or rephrase.');
       }
     } catch (err) {
       console.error(err);
+      alert('Error connecting to AI service. Please check your network or try again.');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Copy Invoice Summary
-  const handleCopySummary = () => {
-    if (!validateInvoice()) return;
+  // Copy Summary or Share Text
+  const handleCopySummary = async () => {
+    if (!validateForm()) return;
 
-    const itemsSummary = data.items
-      .map((it) => `• ${it.description} (${it.quantity}x ${currentSymbol}${it.unitPrice.toFixed(2)}) = ${currentSymbol}${(it.quantity * it.unitPrice).toFixed(2)}`)
+    const itemsText = data.items
+      .map((it) => `• ${it.description} (${it.quantity}x ${data.currencySymbol}${it.unitPrice.toFixed(2)}) = ${data.currencySymbol}${(it.quantity * it.unitPrice).toFixed(2)}`)
       .join('\n');
 
     const summaryText = `
-INVOICE SUMMARY — ${fullInvoiceNumber}
-Date: ${data.invoiceDate} | Due: ${data.dueDate}
+INVOICE ${fullInvoiceNumber}
+Status: ${data.status.toUpperCase()}
+Date: ${data.invoiceDate} | Due Date: ${data.dueDate}
 
 FROM:
-${data.senderName} (${data.senderEmail})
+${data.senderName}
+${data.senderEmail ? `Email: ${data.senderEmail}` : ''}
+${data.senderTaxId ? `Tax ID: ${data.senderTaxId}` : ''}
 ${data.senderAddress}
 
 BILL TO:
-${data.clientName} (${data.clientEmail})
+${data.clientName}
+${data.clientEmail ? `Email: ${data.clientEmail}` : ''}
 ${data.clientAddress}
 
 ITEMS:
-${itemsSummary}
+${itemsText}
 
 ----------------------------------------
-Subtotal: ${currentSymbol}${subtotal.toFixed(2)}
-${data.taxRate > 0 ? `Tax (${data.taxRate}%): +${currentSymbol}${taxAmount.toFixed(2)}\n` : ''}${data.discount > 0 ? `Discount (${data.discount}%): -${currentSymbol}${discountAmount.toFixed(2)}\n` : ''}TOTAL DUE: ${currentSymbol}${grandTotal.toFixed(2)}
+Subtotal: ${data.currencySymbol}${subtotal.toFixed(2)}
+${discountAmount > 0 ? `Discount: -${data.currencySymbol}${discountAmount.toFixed(2)}\n` : ''}${taxAmount > 0 ? `${data.taxLabel} (${data.taxRate}%): +${data.currencySymbol}${taxAmount.toFixed(2)}\n` : ''}${shippingAmount > 0 ? `Shipping: +${data.currencySymbol}${shippingAmount.toFixed(2)}\n` : ''}TOTAL DUE: ${data.currencySymbol}${grandTotal.toFixed(2)}
 
-Notes: ${data.notes || 'N/A'}
+${data.paymentInstructions ? `Payment Info:\n${data.paymentInstructions}\n` : ''}${data.notes ? `Notes:\n${data.notes}` : ''}
 `.trim();
 
-    navigator.clipboard.writeText(summaryText);
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2500);
+    const ok = await copyToClipboard(summaryText);
+    if (ok) {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2500);
+    }
   };
 
-  // Save to localStorage Saved Invoices
+  // JSON Export & Import
+  const handleExportJson = () => {
+    const jsonStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoice_${fullInvoiceNumber.toLowerCase()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    triggerConfetti();
+    setAiSuccessMsg(`Exported ${fullInvoiceNumber}.json!`);
+  };
+
+  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.items)) {
+          updateData({ ...DEFAULT_INVOICE, ...parsed });
+          triggerConfetti();
+          setAiSuccessMsg('Successfully imported invoice JSON data!');
+        } else {
+          alert('Invalid invoice JSON structure.');
+        }
+      } catch {
+        alert('Failed to parse JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // Save to Local History
   const handleSaveLocally = () => {
-    if (!validateInvoice()) return;
+    if (!validateForm()) return;
 
     const title = saveTitle.trim() || `${data.clientName || 'Invoice'} (${fullInvoiceNumber})`;
     const newSaved: SavedInvoice = {
@@ -582,17 +689,17 @@ Notes: ${data.notes || 'N/A'}
       data: { ...data },
     };
 
-    const updatedList = [newSaved, ...savedInvoices];
+    const updatedList = [newSaved, ...savedInvoices.filter((s) => s.id !== newSaved.id)];
     setSavedInvoices(updatedList);
     localStorage.setItem('nuvoratools_saved_invoices', JSON.stringify(updatedList));
     setSaveTitle('');
-    setAiSuccessMsg(`Saved "${title}" to local browser storage!`);
+    setAiSuccessMsg(`Saved "${title}" to history!`);
     triggerConfetti();
   };
 
   const handleLoadSavedInvoice = (saved: SavedInvoice) => {
     updateData(saved.data);
-    setSavedInvoicesModalOpen(false);
+    setSavedModalOpen(false);
     setAiSuccessMsg(`Loaded saved invoice: ${saved.title}`);
   };
 
@@ -603,172 +710,291 @@ Notes: ${data.notes || 'N/A'}
     localStorage.setItem('nuvoratools_saved_invoices', JSON.stringify(filtered));
   };
 
-  // PDF Generation with Custom Logo Integration
+  // Filter Saved Invoices
+  const filteredSavedInvoices = useMemo(() => {
+    if (!historySearch.trim()) return savedInvoices;
+    const query = historySearch.toLowerCase();
+    return savedInvoices.filter(
+      (s) =>
+        s.title.toLowerCase().includes(query) ||
+        s.data.clientName.toLowerCase().includes(query) ||
+        `${s.data.numberPrefix}${s.data.sequenceNumber}`.toLowerCase().includes(query)
+    );
+  }, [savedInvoices, historySearch]);
+
+  // PDF Generation with 1:1 Design Fidelity
   const generatePdf = () => {
-    if (!validateInvoice()) return;
+    if (!validateForm()) return;
 
-    const doc = new jsPDF();
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const theme = THEME_COLORS[data.themeColor] || THEME_COLORS.indigo;
 
-    // Dark header bar
-    doc.setFillColor(30, 41, 59);
+    // Convert hex theme to RGB
+    const hexToRgb = (hex: string) => {
+      const bigint = parseInt(hex.replace('#', ''), 16);
+      return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+    };
+    const rgb = hexToRgb(theme.hex);
+
+    // Header Background Bar
+    doc.setFillColor(rgb.r, rgb.g, rgb.b);
     doc.rect(0, 0, 210, 36, 'F');
 
     let titleX = 14;
-    // Embed custom logo if available
+    // Embed Logo if available
     if (data.logoUrl) {
       try {
         doc.addImage(data.logoUrl, 'PNG', 14, 6, 24, 24);
         titleX = 42;
       } catch (err) {
-        console.warn('Logo embed in PDF failed:', err);
+        console.warn('PDF logo embed fallback:', err);
       }
     }
 
-    // Header Title
+    // Header Title & Invoice Number
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
+    doc.setFontSize(22);
     doc.text('INVOICE', titleX, 22);
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`# ${fullInvoiceNumber}`, 196, 22, { align: 'right' });
+    doc.text(`# ${fullInvoiceNumber}`, 196, 18, { align: 'right' });
+    doc.setFontSize(9);
+    doc.text(`Status: ${data.status.toUpperCase()}`, 196, 25, { align: 'right' });
 
-    // Dates
+    // Dates & Info Box
     doc.setTextColor(51, 65, 85);
     doc.setFontSize(9);
-    doc.text(`Date: ${data.invoiceDate}`, 14, 46);
-    doc.text(`Due Date: ${data.dueDate}`, 14, 52);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Invoice Date: ${data.invoiceDate}`, 14, 46);
+    doc.text(`Payment Due: ${data.dueDate}`, 14, 52);
 
-    // Sender & Client Block
+    // Sender Block (Left) & Client Block (Right)
+    doc.setFillColor(248, 250, 252);
+    doc.rect(14, 58, 88, 36, 'F');
+    doc.rect(108, 58, 88, 36, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text('BILLED FROM:', 18, 64);
+    doc.text('BILLED TO:', 112, 64);
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text('FROM:', 14, 64);
-    doc.text('BILL TO:', 110, 64);
+    doc.setTextColor(15, 23, 42);
+    doc.text(data.senderName || 'Sender Name', 18, 71);
+    doc.text(data.clientName || 'Client Name', 112, 71);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text(data.senderName || 'N/A', 14, 70);
-    doc.text(data.senderEmail || '', 14, 75);
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+
+    let senderY = 76;
+    if (data.senderEmail) {
+      doc.text(data.senderEmail, 18, senderY);
+      senderY += 4.5;
+    }
+    if (data.senderTaxId) {
+      doc.text(data.senderTaxId, 18, senderY);
+      senderY += 4.5;
+    }
     if (data.senderAddress) {
-      const sAddrLines = doc.splitTextToSize(data.senderAddress, 85);
-      doc.text(sAddrLines, 14, 80);
+      const lines = doc.splitTextToSize(data.senderAddress, 80);
+      doc.text(lines, 18, senderY);
     }
 
-    doc.text(data.clientName || 'N/A', 110, 70);
-    doc.text(data.clientEmail || '', 110, 75);
+    let clientY = 76;
+    if (data.clientEmail) {
+      doc.text(data.clientEmail, 112, clientY);
+      clientY += 4.5;
+    }
+    if (data.clientTaxId) {
+      doc.text(data.clientTaxId, 112, clientY);
+      clientY += 4.5;
+    }
     if (data.clientAddress) {
-      const cAddrLines = doc.splitTextToSize(data.clientAddress, 85);
-      doc.text(cAddrLines, 110, 80);
+      const lines = doc.splitTextToSize(data.clientAddress, 80);
+      doc.text(lines, 112, clientY);
     }
 
-    // Items Table Header
-    let startY = 104;
-    doc.setFillColor(241, 245, 249);
+    // Line Items Table Header
+    let startY = 102;
+    doc.setFillColor(rgb.r, rgb.g, rgb.b);
     doc.rect(14, startY, 182, 8, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text('Item Description', 18, startY + 5.5);
-    doc.text('Qty', 125, startY + 5.5, { align: 'center' });
-    doc.text('Unit Price', 155, startY + 5.5, { align: 'right' });
-    doc.text('Total', 192, startY + 5.5, { align: 'right' });
+    doc.setFontSize(8.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('DESCRIPTION', 18, startY + 5.5);
+    doc.text('QTY', 125, startY + 5.5, { align: 'center' });
+    doc.text(`UNIT PRICE (${data.currencySymbol})`, 155, startY + 5.5, { align: 'right' });
+    doc.text(`AMOUNT (${data.currencySymbol})`, 192, startY + 5.5, { align: 'right' });
 
-    // Table Items
+    // Table Body
     let currentY = startY + 14;
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
 
-    data.items.forEach((item) => {
-      const lineTotal = item.quantity * item.unitPrice;
-      const descLines = doc.splitTextToSize(item.description || 'Item', 100);
+    data.items.forEach((item, index) => {
+      const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+      const descLines = doc.splitTextToSize(item.description || 'Service item', 100);
+
+      // Alternate row background
+      if (index % 2 === 1) {
+        doc.setFillColor(248, 250, 252);
+        const rowHeight = Math.max(8, descLines.length * 5);
+        doc.rect(14, currentY - 4, 182, rowHeight, 'F');
+      }
+
+      doc.setTextColor(30, 41, 59);
       doc.text(descLines, 18, currentY);
       doc.text(item.quantity.toString(), 125, currentY, { align: 'center' });
-      doc.text(`${currentSymbol}${item.unitPrice.toFixed(2)}`, 155, currentY, { align: 'right' });
-      doc.text(`${currentSymbol}${lineTotal.toFixed(2)}`, 192, currentY, { align: 'right' });
+      doc.text(`${data.currencySymbol}${(Number(item.unitPrice) || 0).toFixed(2)}`, 155, currentY, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${data.currencySymbol}${lineTotal.toFixed(2)}`, 192, currentY, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
 
-      const lineIncrement = Math.max(10, descLines.length * 6);
+      const lineIncrement = Math.max(9, descLines.length * 5 + 3);
       doc.setDrawColor(226, 232, 240);
-      doc.line(14, currentY + lineIncrement - 4, 196, currentY + lineIncrement - 4);
+      doc.line(14, currentY + lineIncrement - 3, 196, currentY + lineIncrement - 3);
       currentY += lineIncrement;
     });
 
-    // Totals Section
+    // Totals Breakdown Section
     currentY += 4;
-    const totalsX = 130;
+    const totalsX = 125;
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+
     doc.text('Subtotal:', totalsX, currentY);
-    doc.text(`${currentSymbol}${subtotal.toFixed(2)}`, 192, currentY, { align: 'right' });
+    doc.text(`${data.currencySymbol}${subtotal.toFixed(2)}`, 192, currentY, { align: 'right' });
 
-    if (data.taxRate > 0) {
-      currentY += 6;
-      doc.text(`Tax (${data.taxRate}%):`, totalsX, currentY);
-      doc.text(`${currentSymbol}${taxAmount.toFixed(2)}`, 192, currentY, { align: 'right' });
+    if (discountAmount > 0) {
+      currentY += 5.5;
+      doc.text(`Discount (${data.discount}${data.discountType === 'percentage' ? '%' : ''}):`, totalsX, currentY);
+      doc.text(`-${data.currencySymbol}${discountAmount.toFixed(2)}`, 192, currentY, { align: 'right' });
     }
 
-    if (data.discount > 0) {
-      currentY += 6;
-      doc.text(`Discount (${data.discount}%):`, totalsX, currentY);
-      doc.text(`-${currentSymbol}${discountAmount.toFixed(2)}`, 192, currentY, { align: 'right' });
+    if (taxAmount > 0) {
+      currentY += 5.5;
+      doc.text(`${data.taxLabel || 'Tax'} (${data.taxRate}%):`, totalsX, currentY);
+      doc.text(`+${data.currencySymbol}${taxAmount.toFixed(2)}`, 192, currentY, { align: 'right' });
     }
 
+    if (shippingAmount > 0) {
+      currentY += 5.5;
+      doc.text('Shipping / Delivery:', totalsX, currentY);
+      doc.text(`+${data.currencySymbol}${shippingAmount.toFixed(2)}`, 192, currentY, { align: 'right' });
+    }
+
+    // Grand Total Highlight Box
     currentY += 8;
+    doc.setFillColor(rgb.r, rgb.g, rgb.b);
+    doc.rect(120, currentY - 5, 76, 10, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text('Total Due:', totalsX, currentY);
-    doc.text(`${currentSymbol}${grandTotal.toFixed(2)}`, 192, currentY, { align: 'right' });
+    doc.setTextColor(255, 255, 255);
+    doc.text('TOTAL DUE:', totalsX, currentY + 2);
+    doc.text(`${data.currencySymbol}${grandTotal.toFixed(2)}`, 192, currentY + 2, { align: 'right' });
 
-    // Notes
-    if (data.notes) {
-      currentY += 18;
-      doc.setFontSize(9);
+    // Payment Instructions & Notes
+    currentY += 18;
+    if (data.paymentInstructions) {
+      doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
-      doc.text('Notes & Payment Terms:', 14, currentY);
+      doc.setTextColor(30, 41, 59);
+      doc.text('PAYMENT INSTRUCTIONS & BANK DETAILS:', 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      const payLines = doc.splitTextToSize(data.paymentInstructions, 180);
+      doc.text(payLines, 14, currentY + 4.5);
+      currentY += payLines.length * 4 + 6;
+    }
+
+    if (data.notes) {
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text('NOTES & TERMS:', 14, currentY);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(100, 116, 139);
-      const notesLines = doc.splitTextToSize(data.notes, 180);
-      doc.text(notesLines, 14, currentY + 5);
+      const noteLines = doc.splitTextToSize(data.notes, 180);
+      doc.text(noteLines, 14, currentY + 4.5);
     }
 
-    doc.save(`${fullInvoiceNumber.toLowerCase()}_invoice.pdf`);
+    // Footer Page Tag
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text('Generated via NuvoraTools AI Invoice Builder — 100% Client-Side Privacy', 105, 287, { align: 'center' });
+
+    doc.save(`invoice_${fullInvoiceNumber.toLowerCase()}.pdf`);
     triggerConfetti();
   };
 
   return (
     <div className="space-y-6">
-      {/* Action Toolbar Header */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+      {/* Print-Only CSS Stylesheet Injection */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #printable-invoice, #printable-invoice * {
+            visibility: visible;
+          }
+          #printable-invoice {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            margin: 0;
+            padding: 20px;
+            box-shadow: none;
+            border: none;
+            background: white !important;
+            color: black !important;
+          }
+        }
+      `}</style>
+
+      {/* Main Top Action Bar */}
+      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs print:hidden">
+        {/* Left Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Load Sample */}
+          {/* Apply Sample */}
           <button
             type="button"
-            onClick={handleLoadSample}
+            onClick={() => handleApplyTemplate('freelancer')}
             className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-900 font-semibold flex items-center gap-1.5 transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Load Sample Invoice</span>
+            <span>Load Sample Data</span>
           </button>
 
-          {/* Clear All */}
+          {/* Clear */}
           <button
             type="button"
             onClick={handleClearAll}
             className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-1.5 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5 text-slate-400" />
-            <span>Clear All</span>
+            <span>Clear</span>
           </button>
 
-          {/* Duplicate Invoice */}
+          {/* Duplicate */}
           <button
             type="button"
             onClick={handleDuplicate}
             className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-1.5 transition-colors"
-            title="Duplicate invoice with new number"
+            title="Duplicate invoice with incremented number"
           >
             <Copy className="w-3.5 h-3.5 text-slate-400" />
-            <span>Duplicate</span>
+            <span>Duplicate Invoice</span>
           </button>
 
           {/* Undo / Redo */}
@@ -794,93 +1020,135 @@ Notes: ${data.notes || 'N/A'}
           </div>
         </div>
 
+        {/* Right Action Buttons */}
         <div className="flex items-center gap-2">
-          {/* Saved Invoices Modal Button */}
+          {/* Saved History */}
           <button
             type="button"
-            onClick={() => setSavedInvoicesModalOpen(true)}
+            onClick={() => setSavedModalOpen(true)}
             className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-1.5 transition-colors"
           >
             <FolderOpen className="w-3.5 h-3.5 text-slate-400" />
-            <span>Saved ({savedInvoices.length})</span>
+            <span>History ({savedInvoices.length})</span>
           </button>
 
-          {/* Save Local */}
+          {/* Save Draft */}
           <button
             type="button"
             onClick={handleSaveLocally}
             className="px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 font-medium flex items-center gap-1.5 transition-colors"
           >
             <Save className="w-3.5 h-3.5" />
-            <span>Save Local</span>
+            <span>Save Draft</span>
           </button>
 
-          {/* Copy Summary */}
+          {/* JSON Export */}
           <button
             type="button"
-            onClick={handleCopySummary}
+            onClick={handleExportJson}
             className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-1.5 transition-colors"
+            title="Export invoice as JSON file"
           >
-            {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-            <span>{copySuccess ? 'Copied!' : 'Copy Summary'}</span>
+            <FileJson className="w-3.5 h-3.5 text-slate-400" />
+            <span className="hidden sm:inline">Export JSON</span>
           </button>
+
+          {/* JSON Import Button */}
+          <button
+            type="button"
+            onClick={() => jsonInputRef.current?.click()}
+            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-1.5 transition-colors"
+            title="Import invoice JSON file"
+          >
+            <Upload className="w-3.5 h-3.5 text-slate-400" />
+            <span className="hidden sm:inline">Import JSON</span>
+          </button>
+          <input
+            ref={jsonInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImportJson}
+          />
         </div>
       </div>
 
-      {/* Validation Warning Banner */}
-      {validationError && (
-        <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs flex items-center justify-between gap-2">
+      {/* Validation Warnings */}
+      {Object.keys(validationErrors).length > 0 && (
+        <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs flex items-center justify-between gap-2 print:hidden">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span className="font-medium">{validationError}</span>
+            <span className="font-medium">
+              Please fix validation issues: {Object.values(validationErrors).join(' • ')}
+            </span>
           </div>
-          <button onClick={() => setValidationError(null)} className="p-1 hover:text-red-800">
-            <X className="w-3 h-3" />
+          <button onClick={() => setValidationErrors({})} className="p-1 hover:text-red-800">
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* AI Smart Fill Banner */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 border border-blue-200/80 dark:border-blue-900/40 shadow-xs">
-        <div className="flex items-center gap-2 mb-1.5 text-blue-600 dark:text-blue-400 font-semibold text-xs">
-          <Sparkles className="w-4 h-4" />
-          <span>AI Natural Language Fill</span>
+      {/* AI Smart Natural Language Parser Banner */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 border border-blue-200/80 dark:border-blue-900/40 shadow-xs print:hidden space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+            <Sparkles className="w-4 h-4" />
+            <span>AI Natural Language Invoice Fill</span>
+          </div>
+          <span className="text-[10px] text-slate-500 dark:text-slate-400">Gemini 3.6 Flash Powered</span>
         </div>
-        <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
-          Describe your work, client name, and rate in plain English to automatically fill out invoice fields.
-        </p>
-        <form onSubmit={handleAiSmartFill} className="flex gap-2">
+
+        <form onSubmit={(e) => handleAiSmartFill(e)} className="flex gap-2">
           <input
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g., Invoice $2,400 to TechCorp for 30 hours of React Development with 10% tax..."
-            className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="e.g., Invoice John Smith $2500 for Nursing Services due in 14 days..."
+            className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white"
           />
           <button
             type="submit"
             disabled={isGenerating || !prompt.trim()}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-xs shrink-0"
           >
             {isGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
             <span>Auto Fill</span>
           </button>
         </form>
+
+        {/* Example Prompt Badges */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Try Examples:</span>
+          {SAMPLE_PROMPTS.map((exPrompt, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                setPrompt(exPrompt);
+                handleAiSmartFill(undefined, exPrompt);
+              }}
+              className="px-2.5 py-1 text-[11px] rounded-lg bg-white/80 dark:bg-slate-900/80 hover:bg-indigo-50 dark:hover:bg-indigo-950 border border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium transition-colors"
+            >
+              "{exPrompt}"
+            </button>
+          ))}
+        </div>
+
         {aiSuccessMsg && (
-          <div className="mt-2 text.xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+          <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-semibold pt-1">
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>{aiSuccessMsg}</span>
           </div>
         )}
       </div>
 
-      {/* Industry Templates Selector */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-3 shadow-sm">
+      {/* Quick Profession Templates Selector */}
+      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-3 shadow-xs print:hidden">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Quick Profession Templates
+            Quick Profession Presets
           </h4>
-          <span className="text-[10px] text-slate-400">Click to load preset fields & items</span>
+          <span className="text-[10px] text-slate-400">Click to populate preset business details</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {Object.entries(TEMPLATES).map(([key, tmpl]) => (
@@ -902,30 +1170,61 @@ Notes: ${data.notes || 'N/A'}
         </div>
       </div>
 
+      {/* Mobile Tab Switcher */}
+      <div className="flex lg:hidden rounded-xl bg-slate-100 dark:bg-slate-900 p-1 text-xs font-semibold print:hidden">
+        <button
+          onClick={() => setMobileTab('editor')}
+          className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors ${
+            mobileTab === 'editor' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-white shadow-xs' : 'text-slate-500'
+          }`}
+        >
+          <Edit3 className="w-3.5 h-3.5" />
+          <span>Editor Form</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('preview')}
+          className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors ${
+            mobileTab === 'preview' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-white shadow-xs' : 'text-slate-500'
+          }`}
+        >
+          <Eye className="w-3.5 h-3.5" />
+          <span>Live Preview & PDF</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('history')}
+          className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors ${
+            mobileTab === 'history' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-white shadow-xs' : 'text-slate-500'
+          }`}
+        >
+          <FolderOpen className="w-3.5 h-3.5" />
+          <span>Saved ({savedInvoices.length})</span>
+        </button>
+      </div>
+
       {/* Main Grid: Form Editor Left, Live Document Preview Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Editor Form Column */}
-        <div className="lg:col-span-6 space-y-6">
-          {/* Header & Logo Section */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2.5 flex items-center justify-between">
-              <span className="flex items-center gap-2">
+        <div className={`lg:col-span-6 space-y-6 ${mobileTab !== 'editor' ? 'hidden lg:block' : ''} print:hidden`}>
+          {/* Identity & Branding Section */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-4 shadow-xs">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-indigo-500" />
-                <span>Invoice Identity & Logo</span>
+                <span>Invoice Identity & Theme</span>
               </span>
             </h3>
 
-            {/* Logo Drag & Drop Zone */}
+            {/* Custom Logo Upload Area */}
             <div
               onDragOver={(e) => {
                 e.preventDefault();
-                setIsDragging(true);
+                setIsDraggingLogo(true);
               }}
-              onDragLeave={() => setIsDragging(false)}
+              onDragLeave={() => setIsDraggingLogo(false)}
               onDrop={handleLogoDrop}
               onClick={() => fileInputRef.current?.click()}
               className={`p-4 rounded-xl border-2 border-dashed text-center cursor-pointer transition-all ${
-                isDragging
+                isDraggingLogo
                   ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/50'
                   : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400 bg-slate-50 dark:bg-slate-950/60'
               }`}
@@ -944,47 +1243,80 @@ Notes: ${data.notes || 'N/A'}
               {data.logoUrl ? (
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <img src={data.logoUrl} alt="Company Logo" className="h-10 w-auto object-contain rounded border bg-white p-1" />
-                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Custom Logo Uploaded</span>
+                    <img src={data.logoUrl} alt="Logo" className="h-10 w-auto object-contain rounded border bg-white p-1" />
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-slate-800 dark:text-white">Custom Logo Uploaded</p>
+                      <p className="text-[10px] text-slate-400">Click or drag new image to replace</p>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateData((prev) => ({ ...prev, logoUrl: null }));
-                    }}
-                    className="p-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg font-medium transition-colors"
-                  >
-                    Remove Logo
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        updateData((prev) => ({ ...prev, logoUrl: null }));
+                      }}
+                      className="px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg font-medium transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-1 py-1">
                   <Upload className="w-5 h-5 text-indigo-500 mx-auto" />
                   <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Upload Company Logo <span className="font-normal text-slate-400">(Drag & Drop or Click)</span>
+                    Upload Business Logo <span className="font-normal text-slate-400">(PNG, JPG, SVG up to 5MB)</span>
                   </p>
-                  <p className="text-[10px] text-slate-400">PNG, JPG, SVG, WebP up to 5MB</p>
+                  <p className="text-[10px] text-slate-400">Drag & Drop or click to browse</p>
                 </div>
               )}
             </div>
 
-            {/* Numbering & Dates */}
+            {/* Theme & Status Options */}
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Invoice Status</label>
+                <select
+                  value={data.status}
+                  onChange={(e) => updateData((prev) => ({ ...prev, status: e.target.value as any }))}
+                  className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-semibold"
+                >
+                  <option value="pending">Pending Payment</option>
+                  <option value="paid">Paid</option>
+                  <option value="draft">Draft</option>
+                  <option value="overdue">Overdue</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Theme Color Accent</label>
+                <select
+                  value={data.themeColor}
+                  onChange={(e) => updateData((prev) => ({ ...prev, themeColor: e.target.value as any }))}
+                  className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-semibold"
+                >
+                  <option value="indigo">Indigo Modern</option>
+                  <option value="navy">Executive Navy</option>
+                  <option value="emerald">Emerald Green</option>
+                  <option value="sky">Sky Blue</option>
+                  <option value="slate">Graphite Slate</option>
+                  <option value="rose">Rose Corporate</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Sequence Numbering & Dates */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
               <div>
                 <label className="block text-slate-500 font-medium mb-1">Prefix</label>
-                <select
+                <input
+                  type="text"
                   value={data.numberPrefix}
                   onChange={(e) => updateData((prev) => ({ ...prev, numberPrefix: e.target.value }))}
                   className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono"
-                >
-                  <option value="INV-">INV-</option>
-                  <option value="FACT-">FACT-</option>
-                  <option value="BILL-">BILL-</option>
-                  <option value="2026-">2026-</option>
-                  <option value="NO-">NO-</option>
-                  <option value="">(None)</option>
-                </select>
+                  placeholder="e.g. INV-"
+                />
               </div>
 
               <div>
@@ -992,9 +1324,8 @@ Notes: ${data.notes || 'N/A'}
                   <span>Seq Number</span>
                   <button
                     type="button"
-                    onClick={handleIncrementNumber}
+                    onClick={() => updateData((prev) => ({ ...prev, sequenceNumber: prev.sequenceNumber + 1 }))}
                     className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
-                    title="Increment +1"
                   >
                     +1 Next
                   </button>
@@ -1011,17 +1342,22 @@ Notes: ${data.notes || 'N/A'}
                 <label className="block text-slate-500 font-medium mb-1">Currency</label>
                 <select
                   value={data.currency}
-                  onChange={(e) => updateData((prev) => ({ ...prev, currency: e.target.value }))}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-semibold"
+                  onChange={(e) => {
+                    const c = e.target.value;
+                    updateData((prev) => ({ ...prev, currency: c, currencySymbol: CURRENCY_MAP[c] || c }));
+                  }}
+                  className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold"
                 >
                   <option value="USD">USD ($)</option>
                   <option value="EUR">EUR (€)</option>
                   <option value="GBP">GBP (£)</option>
+                  <option value="BRL">BRL (R$)</option>
                   <option value="CAD">CAD (CA$)</option>
                   <option value="AUD">AUD (A$)</option>
-                  <option value="BRL">BRL (R$)</option>
                   <option value="JPY">JPY (¥)</option>
                   <option value="INR">INR (₹)</option>
+                  <option value="CHF">CHF</option>
+                  <option value="MXN">MXN (MEX$)</option>
                 </select>
               </div>
 
@@ -1047,17 +1383,20 @@ Notes: ${data.notes || 'N/A'}
             </div>
 
             {/* Sender & Client Side-by-Side */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-3 border-t border-slate-100 dark:border-slate-800">
               {/* Sender */}
               <div className="space-y-2">
-                <span className="font-bold text-slate-800 dark:text-slate-200">Your Info (Sender)</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                  <span>Billed From (Your Info)</span>
+                  {validationErrors.senderName && <span className="text-[10px] text-red-500 font-normal">*Required</span>}
+                </span>
                 <input
                   type="text"
                   placeholder="Your Business / Full Name *"
                   value={data.senderName}
                   onChange={(e) => updateData((prev) => ({ ...prev, senderName: e.target.value }))}
                   className={`w-full px-3 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white ${
-                    validationError && !data.senderName ? 'border-red-400 bg-red-50/20' : 'border-slate-200 dark:border-slate-800'
+                    validationErrors.senderName ? 'border-red-500 bg-red-50/20' : 'border-slate-200 dark:border-slate-800'
                   }`}
                 />
                 <input
@@ -1067,8 +1406,15 @@ Notes: ${data.notes || 'N/A'}
                   onChange={(e) => updateData((prev) => ({ ...prev, senderEmail: e.target.value }))}
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
                 />
+                <input
+                  type="text"
+                  placeholder="Tax ID / EIN / CNPJ (Optional)"
+                  value={data.senderTaxId}
+                  onChange={(e) => updateData((prev) => ({ ...prev, senderTaxId: e.target.value }))}
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+                />
                 <textarea
-                  placeholder="Address, Phone, Tax/VAT ID"
+                  placeholder="Address Line, Phone, Country"
                   rows={2}
                   value={data.senderAddress}
                   onChange={(e) => updateData((prev) => ({ ...prev, senderAddress: e.target.value }))}
@@ -1078,14 +1424,17 @@ Notes: ${data.notes || 'N/A'}
 
               {/* Client */}
               <div className="space-y-2">
-                <span className="font-bold text-slate-800 dark:text-slate-200">Bill To (Client)</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                  <span>Billed To (Client)</span>
+                  {validationErrors.clientName && <span className="text-[10px] text-red-500 font-normal">*Required</span>}
+                </span>
                 <input
                   type="text"
                   placeholder="Client / Company Name *"
                   value={data.clientName}
                   onChange={(e) => updateData((prev) => ({ ...prev, clientName: e.target.value }))}
                   className={`w-full px-3 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white ${
-                    validationError && !data.clientName ? 'border-red-400 bg-red-50/20' : 'border-slate-200 dark:border-slate-800'
+                    validationErrors.clientName ? 'border-red-500 bg-red-50/20' : 'border-slate-200 dark:border-slate-800'
                   }`}
                 />
                 <input
@@ -1093,6 +1442,13 @@ Notes: ${data.notes || 'N/A'}
                   placeholder="Client Email"
                   value={data.clientEmail}
                   onChange={(e) => updateData((prev) => ({ ...prev, clientEmail: e.target.value }))}
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+                />
+                <input
+                  type="text"
+                  placeholder="Client Tax ID / VAT ID (Optional)"
+                  value={data.clientTaxId}
+                  onChange={(e) => updateData((prev) => ({ ...prev, clientTaxId: e.target.value }))}
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
                 />
                 <textarea
@@ -1106,14 +1462,19 @@ Notes: ${data.notes || 'N/A'}
             </div>
           </div>
 
-          {/* Line Items Editor */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Line Items</h3>
+          {/* Line Items Manager */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-4 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Line Items ({data.items.length})
+                </h3>
+                <p className="text-[10px] text-slate-400">Drag handle or use arrows to reorder items</p>
+              </div>
               <button
                 type="button"
                 onClick={addItem}
-                className="px-3 py-1.5 text-xs bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-lg font-semibold flex items-center gap-1 transition-colors"
+                className="px-3 py-1.5 text-xs bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-lg font-bold flex items-center gap-1 transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Item</span>
@@ -1121,31 +1482,70 @@ Notes: ${data.notes || 'N/A'}
             </div>
 
             <div className="space-y-2.5">
-              {data.items.map((item) => (
+              {data.items.map((item, index) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-12 gap-2 items-center text-xs p-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800/60"
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDragEnd={handleDragEnd}
+                  className={`grid grid-cols-12 gap-2 items-center text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border transition-all ${
+                    draggedItemIndex === index ? 'opacity-50 border-indigo-500 scale-[0.99]' : 'border-slate-200/80 dark:border-slate-800/80'
+                  }`}
                 >
-                  <div className="col-span-6">
+                  {/* Drag Handle & Reorder */}
+                  <div className="col-span-1 flex items-center gap-0.5 text-slate-400">
+                    <span className="cursor-grab hover:text-slate-600 dark:hover:text-slate-200" title="Drag to reorder">
+                      <GripVertical className="w-4 h-4" />
+                    </span>
+                    <div className="flex flex-col text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => moveItem(index, 'up')}
+                        disabled={index === 0}
+                        className="hover:text-indigo-500 disabled:opacity-20"
+                        title="Move Up"
+                      >
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveItem(index, 'down')}
+                        disabled={index === data.items.length - 1}
+                        className="hover:text-indigo-500 disabled:opacity-20"
+                        title="Move Down"
+                      >
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="col-span-5 sm:col-span-5">
                     <input
                       type="text"
-                      placeholder="Service or Product description *"
+                      placeholder="Service description *"
                       value={item.description}
                       onChange={(e) => updateItem(item.id, 'description', e.target.value)}
                       className="w-full px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
                     />
                   </div>
-                  <div className="col-span-2">
+
+                  {/* Quantity */}
+                  <div className="col-span-2 sm:col-span-2">
                     <input
                       type="number"
-                      min="1"
+                      min="0.01"
+                      step="any"
                       placeholder="Qty"
                       value={item.quantity}
                       onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
-                      className="w-full px-2 py-1.5 rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-center"
+                      className="w-full px-2 py-1.5 rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-center font-mono"
                     />
                   </div>
-                  <div className="col-span-3">
+
+                  {/* Unit Price */}
+                  <div className="col-span-3 sm:col-span-3">
                     <input
                       type="number"
                       min="0"
@@ -1153,16 +1553,26 @@ Notes: ${data.notes || 'N/A'}
                       placeholder="Price"
                       value={item.unitPrice}
                       onChange={(e) => updateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                      className="w-full px-2 py-1.5 rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-right"
+                      className="w-full px-2 py-1.5 rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-right font-mono"
                     />
                   </div>
-                  <div className="col-span-1 text-right">
+
+                  {/* Actions (Duplicate & Delete) */}
+                  <div className="col-span-1 flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      onClick={() => duplicateItem(index)}
+                      className="p-1 text-slate-400 hover:text-indigo-500 rounded transition-colors"
+                      title="Duplicate item"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => removeItem(item.id)}
                       disabled={data.items.length <= 1}
                       className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-30 rounded transition-colors"
-                      title="Delete line item"
+                      title="Delete item"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -1171,60 +1581,123 @@ Notes: ${data.notes || 'N/A'}
               ))}
             </div>
 
-            {/* Calculations & Taxes */}
-            <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+            {/* Calculations: Taxes, Discounts, Shipping */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+              {/* Discount */}
               <div>
-                <label className="block text-slate-500 font-medium mb-1">Tax Rate (%)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-500 font-medium">Discount</label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateData((prev) => ({
+                        ...prev,
+                        discountType: prev.discountType === 'percentage' ? 'fixed' : 'percentage',
+                      }))
+                    }
+                    className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                  >
+                    Type: {data.discountType === 'percentage' ? '%' : data.currencySymbol}
+                  </button>
+                </div>
                 <input
                   type="number"
                   min="0"
-                  max="100"
-                  step="0.1"
-                  value={data.taxRate}
-                  onChange={(e) => updateData((prev) => ({ ...prev, taxRate: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-500 font-medium mb-1">Discount (%)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.1"
+                  step="any"
                   value={data.discount}
                   onChange={(e) => updateData((prev) => ({ ...prev, discount: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono"
+                  placeholder="0"
+                />
+              </div>
+
+              {/* Tax Rate & Label */}
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Tax Rate (%)</label>
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={data.taxRate}
+                    onChange={(e) => updateData((prev) => ({ ...prev, taxRate: parseFloat(e.target.value) || 0 }))}
+                    className="w-1/2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono"
+                    placeholder="10"
+                  />
+                  <input
+                    type="text"
+                    value={data.taxLabel}
+                    onChange={(e) => updateData((prev) => ({ ...prev, taxLabel: e.target.value }))}
+                    className="w-1/2 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white text-[11px]"
+                    placeholder="e.g. VAT"
+                  />
+                </div>
+              </div>
+
+              {/* Shipping */}
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Shipping / Delivery</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={data.shipping}
+                  onChange={(e) => updateData((prev) => ({ ...prev, shipping: parseFloat(e.target.value) || 0 }))}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono"
+                  placeholder="0.00"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs text-slate-500 font-medium mb-1">Notes & Terms</label>
-              <textarea
-                rows={2}
-                value={data.notes}
-                onChange={(e) => updateData((prev) => ({ ...prev, notes: e.target.value }))}
-                placeholder="Payment terms, bank wire details, or thank you note..."
-                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white resize-none"
-              />
+            {/* Payment Info & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-2">
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Payment Instructions & Bank Wire</label>
+                <textarea
+                  rows={2}
+                  value={data.paymentInstructions}
+                  onChange={(e) => updateData((prev) => ({ ...prev, paymentInstructions: e.target.value }))}
+                  placeholder="e.g. ACH Routing, IBAN, PIX key, PayPal email..."
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Notes & Terms</label>
+                <textarea
+                  rows={2}
+                  value={data.notes}
+                  onChange={(e) => updateData((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Payment due terms, thank you note, late fee policies..."
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white resize-none"
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Live Document Preview Right Column */}
-        <div className="lg:col-span-6 space-y-4">
-          <div className="flex items-center justify-between">
+        {/* Live Document Preview Column (Right Side on Desktop) */}
+        <div className={`lg:col-span-6 space-y-4 ${mobileTab !== 'preview' ? 'hidden lg:block' : ''}`}>
+          {/* Action Toolbar for Preview */}
+          <div className="flex items-center justify-between print:hidden">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Live Document Preview
             </h3>
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={handleCopySummary}
+                className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium flex items-center gap-1.5 transition-colors"
+              >
+                {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                <span>{copySuccess ? 'Copied Summary!' : 'Copy Summary'}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => window.print()}
                 className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium flex items-center gap-1.5 transition-colors"
               >
-                <Printer className="w-3.5 h-3.5" />
+                <Printer className="w-3.5 h-3.5 text-slate-400" />
                 <span>Print</span>
               </button>
               <button
@@ -1238,127 +1711,184 @@ Notes: ${data.notes || 'N/A'}
             </div>
           </div>
 
-          {/* Document Sheet Container */}
-          <div className="p-8 rounded-2xl bg-white text-slate-900 border border-slate-200 shadow-xl space-y-6 font-sans text-xs min-h-[580px]">
-            {/* Header */}
+          {/* 1:1 Matching Printable Invoice Document Sheet */}
+          <div
+            id="printable-invoice"
+            className="p-8 rounded-2xl bg-white text-slate-900 border border-slate-200 shadow-xl space-y-6 font-sans text-xs min-h-[620px] relative overflow-hidden"
+          >
+            {/* Theme Accent Color Top Stripe */}
+            <div className={`h-2.5 -mx-8 -mt-8 mb-6 ${THEME_COLORS[data.themeColor]?.primary || 'bg-indigo-600'}`} />
+
+            {/* Document Header */}
             <div className="flex justify-between items-start border-b border-slate-200 pb-5">
               <div className="flex items-center gap-3">
                 {data.logoUrl && (
-                  <img src={data.logoUrl} alt="Logo" className="h-12 w-auto object-contain" />
+                  <img src={data.logoUrl} alt="Logo" className="h-12 w-auto max-w-[120px] object-contain" />
                 )}
                 <div>
                   <span className="text-2xl font-black tracking-tight text-slate-900 uppercase">INVOICE</span>
-                  <p className="text-slate-500 font-mono text-[11px] mt-0.5">#{fullInvoiceNumber}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-slate-500 font-mono text-[11px]">#{fullInvoiceNumber}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        data.status === 'paid'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : data.status === 'overdue'
+                          ? 'bg-red-100 text-red-800'
+                          : data.status === 'draft'
+                          ? 'bg-slate-100 text-slate-700'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {data.status}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="font-bold text-slate-900">{data.senderName || 'Sender Name'}</p>
-                <p className="text-slate-500">{data.senderEmail}</p>
-                <p className="text-slate-500 whitespace-pre-line text-[10px] mt-0.5">{data.senderAddress}</p>
+
+              <div className="text-right space-y-0.5">
+                <p className="text-[10px] text-slate-400 font-bold uppercase">Dates & Payment</p>
+                <p className="text-slate-700">
+                  <span className="font-semibold">Invoice Date:</span> {data.invoiceDate}
+                </p>
+                <p className="text-slate-900 font-bold">
+                  <span>Payment Due:</span> {data.dueDate}
+                </p>
               </div>
             </div>
 
-            {/* Bill To & Info */}
+            {/* Billed From & Billed To Side-by-Side Boxes */}
             <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              {/* Sender */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Billed From</p>
+                <p className="font-bold text-slate-900 text-sm">{data.senderName || 'Sender Name'}</p>
+                {data.senderEmail && <p className="text-slate-600">{data.senderEmail}</p>}
+                {data.senderTaxId && <p className="text-slate-500 text-[10px]">{data.senderTaxId}</p>}
+                {data.senderAddress && <p className="text-slate-500 whitespace-pre-line text-[10px] mt-1">{data.senderAddress}</p>}
+              </div>
+
+              {/* Client */}
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Billed To</p>
-                <p className="font-bold text-slate-800">{data.clientName || 'Client Name'}</p>
-                <p className="text-slate-500">{data.clientEmail}</p>
-                <p className="text-slate-500 whitespace-pre-line text-[10px] mt-0.5">{data.clientAddress}</p>
-              </div>
-              <div className="text-right space-y-1">
-                <div>
-                  <span className="text-slate-400 text-[10px] font-bold uppercase">Date: </span>
-                  <span className="font-medium text-slate-700">{data.invoiceDate}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 text-[10px] font-bold uppercase">Payment Due: </span>
-                  <span className="font-semibold text-slate-900">{data.dueDate}</span>
-                </div>
+                <p className="font-bold text-slate-900 text-sm">{data.clientName || 'Client Name'}</p>
+                {data.clientEmail && <p className="text-slate-600">{data.clientEmail}</p>}
+                {data.clientTaxId && <p className="text-slate-500 text-[10px]">{data.clientTaxId}</p>}
+                {data.clientAddress && <p className="text-slate-500 whitespace-pre-line text-[10px] mt-1">{data.clientAddress}</p>}
               </div>
             </div>
 
-            {/* Items Table */}
+            {/* Line Items Table */}
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  <th className="py-2">Description</th>
-                  <th className="py-2 text-center">Qty</th>
-                  <th className="py-2 text-right">Unit Price</th>
-                  <th className="py-2 text-right">Amount</th>
+                <tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/80">
+                  <th className="py-2.5 px-2">Description</th>
+                  <th className="py-2.5 px-2 text-center">Qty</th>
+                  <th className="py-2.5 px-2 text-right">Unit Price</th>
+                  <th className="py-2.5 px-2 text-right">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.items.map((item) => (
-                  <tr key={item.id} className="text-slate-700">
-                    <td className="py-2.5 font-medium">{item.description || '(Blank item)'}</td>
-                    <td className="py-2.5 text-center">{item.quantity}</td>
-                    <td className="py-2.5 text-right">{currentSymbol}{item.unitPrice.toFixed(2)}</td>
-                    <td className="py-2.5 text-right font-bold text-slate-900">
-                      {currentSymbol}{(item.quantity * item.unitPrice).toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
+                {data.items.map((item) => {
+                  const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+                  return (
+                    <tr key={item.id} className="text-slate-700 hover:bg-slate-50/50">
+                      <td className="py-3 px-2 font-medium">{item.description || '(Empty item)'}</td>
+                      <td className="py-3 px-2 text-center font-mono">{item.quantity}</td>
+                      <td className="py-3 px-2 text-right font-mono">
+                        {data.currencySymbol}{(Number(item.unitPrice) || 0).toFixed(2)}
+                      </td>
+                      <td className="py-3 px-2 text-right font-mono font-bold text-slate-900">
+                        {data.currencySymbol}{lineTotal.toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
-            {/* Total Breakdown */}
+            {/* Totals Breakdown Section */}
             <div className="flex justify-end pt-2 border-t border-slate-200">
-              <div className="w-56 space-y-1.5 text-right">
+              <div className="w-64 space-y-1.5 text-right">
                 <div className="flex justify-between text-slate-600">
                   <span>Subtotal:</span>
-                  <span>{currentSymbol}{subtotal.toFixed(2)}</span>
+                  <span className="font-mono">{data.currencySymbol}{subtotal.toFixed(2)}</span>
                 </div>
-                {data.taxRate > 0 && (
-                  <div className="flex justify-between text-slate-600">
-                    <span>Tax ({data.taxRate}%):</span>
-                    <span>+{currentSymbol}{taxAmount.toFixed(2)}</span>
+
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-600">
+                    <span>Discount ({data.discount}{data.discountType === 'percentage' ? '%' : ''}):</span>
+                    <span className="font-mono">-{data.currencySymbol}{discountAmount.toFixed(2)}</span>
                   </div>
                 )}
-                {data.discount > 0 && (
+
+                {taxAmount > 0 && (
                   <div className="flex justify-between text-slate-600">
-                    <span>Discount ({data.discount}%):</span>
-                    <span>-{currentSymbol}{discountAmount.toFixed(2)}</span>
+                    <span>{data.taxLabel || 'Tax'} ({data.taxRate}%):</span>
+                    <span className="font-mono">+{data.currencySymbol}{taxAmount.toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
+
+                {shippingAmount > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Shipping:</span>
+                    <span className="font-mono">+{data.currencySymbol}{shippingAmount.toFixed(2)}</span>
+                  </div>
+                )}
+
+                <div
+                  className={`flex justify-between text-sm font-black text-slate-900 p-2.5 rounded-xl border mt-2 ${
+                    THEME_COLORS[data.themeColor]?.bg || 'bg-indigo-50'
+                  } ${THEME_COLORS[data.themeColor]?.border || 'border-indigo-600'}`}
+                >
                   <span>Total Due:</span>
-                  <span className="text-indigo-600">{currentSymbol}{grandTotal.toFixed(2)}</span>
+                  <span className={`font-mono text-base ${THEME_COLORS[data.themeColor]?.text || 'text-indigo-600'}`}>
+                    {data.currencySymbol}{grandTotal.toFixed(2)}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Notes Footer */}
-            {data.notes && (
-              <div className="pt-4 border-t border-slate-100 text-[10px] text-slate-400">
-                <p className="font-bold text-slate-600 uppercase mb-0.5">Notes & Terms</p>
-                <p className="whitespace-pre-line">{data.notes}</p>
+            {/* Payment Instructions & Notes Footer */}
+            {(data.paymentInstructions || data.notes) && (
+              <div className="pt-4 border-t border-slate-100 text-[10px] space-y-3">
+                {data.paymentInstructions && (
+                  <div>
+                    <p className="font-bold text-slate-700 uppercase tracking-wider mb-0.5">
+                      Payment Instructions & Bank Details
+                    </p>
+                    <p className="text-slate-600 whitespace-pre-line leading-relaxed">{data.paymentInstructions}</p>
+                  </div>
+                )}
+                {data.notes && (
+                  <div>
+                    <p className="font-bold text-slate-700 uppercase tracking-wider mb-0.5">Notes & Terms</p>
+                    <p className="text-slate-500 whitespace-pre-line leading-relaxed">{data.notes}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Saved Invoices Modal */}
-      {savedInvoicesModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4">
+      {/* Saved Invoices History Modal */}
+      {savedModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
+          <div className="w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-indigo-500" />
-                <span>Saved Invoices ({savedInvoices.length})</span>
+                <span>Invoice History & Drafts ({savedInvoices.length})</span>
               </h3>
-              <button
-                onClick={() => setSavedInvoicesModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              >
+              <button onClick={() => setSavedModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Save Current Section */}
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-              <label className="block text-slate-500 font-medium">Save Current Invoice</label>
+              <label className="block text-slate-500 font-medium">Save Current Invoice State</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -1369,17 +1899,28 @@ Notes: ${data.notes || 'N/A'}
                 />
                 <button
                   onClick={handleSaveLocally}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg"
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shrink-0"
                 >
                   Save
                 </button>
               </div>
             </div>
 
+            {/* Search Saved */}
+            {savedInvoices.length > 0 && (
+              <input
+                type="text"
+                placeholder="Search history by client name or invoice number..."
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+              />
+            )}
+
             {/* List of Saved */}
-            <div className="max-h-60 overflow-y-auto space-y-2 text-xs">
-              {savedInvoices.length > 0 ? (
-                savedInvoices.map((saved) => (
+            <div className="max-h-64 overflow-y-auto space-y-2 text-xs">
+              {filteredSavedInvoices.length > 0 ? (
+                filteredSavedInvoices.map((saved) => (
                   <div
                     key={saved.id}
                     onClick={() => handleLoadSavedInvoice(saved)}
@@ -1389,21 +1930,31 @@ Notes: ${data.notes || 'N/A'}
                       <h4 className="font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
                         {saved.title}
                       </h4>
-                      <p className="text-[10px] text-slate-400">Saved at {saved.savedAt}</p>
+                      <p className="text-[10px] text-slate-400">
+                        Saved at {saved.savedAt} • Client: {saved.data.clientName || 'N/A'}
+                      </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteSavedInvoice(saved.id, e)}
-                      className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                      title="Delete saved invoice"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {saved.data.currencySymbol || '$'}
+                        {saved.data.items
+                          .reduce((s, it) => s + (it.quantity * it.unitPrice || 0), 0)
+                          .toFixed(2)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteSavedInvoice(saved.id, e)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Delete invoice"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))
               ) : (
                 <div className="text-center py-6 text-slate-400 text-xs">
-                  No saved invoices found in local browser storage.
+                  {historySearch ? 'No invoices match search.' : 'No saved invoices found in browser history.'}
                 </div>
               )}
             </div>

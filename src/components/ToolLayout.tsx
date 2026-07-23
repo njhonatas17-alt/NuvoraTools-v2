@@ -28,12 +28,12 @@ export default function ToolLayout({
   onNavigate,
   recentlyUsedIds,
 }: ToolLayoutProps) {
-  const { t } = useTranslation();
+  const { language, t } = useTranslation();
   const [shared, setShared] = useState(false);
 
   const ToolComponent = tool.component;
   const relatedTools = getRelatedTools(tool.id);
-  const seoContent = getToolSEOContent(tool);
+  const seoContent = getToolSEOContent(tool, language);
 
   const translatedTitle = t(`tool.${tool.id}.title`, tool.title);
   const translatedDesc = t(`tool.${tool.id}.desc`, tool.shortDescription);
@@ -58,7 +58,7 @@ export default function ToolLayout({
     });
     trackToolUsage(tool.slug, 'view');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [tool, seoContent]);
+  }, [tool, seoContent, language]);
 
   const handleShare = async () => {
     const url = window.location.href;
@@ -156,7 +156,7 @@ export default function ToolLayout({
       <InContentAd />
 
       {/* Full Structured Automated SEO Content Section */}
-      <ToolSEOSection seoContent={seoContent} toolTitle={translatedTitle} />
+      <ToolSEOSection seoContent={seoContent} toolTitle={translatedTitle} currentTool={tool} onNavigate={onNavigate} />
 
       {/* Recently Used Tools */}
       {recentTools.length > 0 && (

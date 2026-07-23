@@ -32,10 +32,10 @@ export default function Navbar({
 
   const navLinks = [
     { label: t('nav.tools', 'All Tools'), route: '' },
-    { label: 'Generators', route: 'category/generator' },
-    { label: 'Calculators', route: 'category/calculator' },
-    { label: 'Converters', route: 'category/converter' },
-    { label: 'Developer', route: 'category/developer' },
+    { label: t('cat.generator.name', 'Generators'), route: 'category/generator' },
+    { label: t('cat.calculator.name', 'Calculators'), route: 'category/calculator' },
+    { label: t('cat.converter.name', 'Converters'), route: 'category/converter' },
+    { label: t('cat.developer.name', 'Developer'), route: 'category/developer' },
   ];
 
   return (
@@ -229,7 +229,7 @@ export default function Navbar({
               }}
               className="p-2.5 rounded-xl text-left border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 font-semibold flex items-center justify-between"
             >
-              <span>Favorites</span>
+              <span>{t('nav.favorites', 'Favorites')}</span>
               <span className="px-1.5 py-0.5 text-[10px] bg-amber-500 text-white font-bold rounded-full">
                 {favoritesCount}
               </span>
@@ -237,7 +237,7 @@ export default function Navbar({
           </div>
 
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-500 font-medium">Select Language:</span>
+            <span className="text-slate-500 font-medium">{t('nav.selectLanguage', 'Select Language:')}</span>
             <div className="flex gap-1">
               {languages.map((l) => (
                 <button

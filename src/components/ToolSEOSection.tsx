@@ -1,16 +1,27 @@
 import React, { useState } from 'react';
-import { HelpCircle, ChevronRight, CheckCircle2, Sparkles, BookOpen, Lightbulb, Target, ArrowRight } from 'lucide-react';
+import { HelpCircle, ChevronRight, CheckCircle2, Sparkles, BookOpen, Lightbulb, Target, ArrowRight, Link2, Layers, Tag } from 'lucide-react';
 import { ToolSEOContent } from '../types/seoContent';
+import { ToolDefinition } from '../types/tool';
+import { TOOLS_REGISTRY, CATEGORIES } from '../config/toolsRegistry';
 import { useTranslation } from '../i18n/i18nContext';
 
 interface ToolSEOSectionProps {
   seoContent: ToolSEOContent;
   toolTitle: string;
+  currentTool?: ToolDefinition;
+  onNavigate?: (route: string) => void;
 }
 
-export default function ToolSEOSection({ seoContent, toolTitle }: ToolSEOSectionProps) {
+export default function ToolSEOSection({ seoContent, toolTitle, currentTool, onNavigate }: ToolSEOSectionProps) {
   const { t } = useTranslation();
   const [openFaq, setOpenFaq] = useState<number | null>(0); // First FAQ open by default
+
+  // Build workflow tools chain
+  const relatedToolsInChain = currentTool
+    ? (currentTool.relatedToolIds || [])
+        .map((id) => TOOLS_REGISTRY.find((tool) => tool.id === id || tool.slug === id))
+        .filter((tool): tool is ToolDefinition => tool !== undefined)
+    : [];
 
   return (
     <article className="space-y-10 pt-6 border-t border-slate-200/80 dark:border-slate-800/80 text-slate-700 dark:text-slate-300">
@@ -134,7 +145,7 @@ export default function ToolSEOSection({ seoContent, toolTitle }: ToolSEOSection
         </section>
       </div>
 
-      {/* 5. Comprehensive FAQ Accordion (8 - 10 Questions) */}
+      {/* 5. Comprehensive FAQ Accordion */}
       {seoContent.faq && seoContent.faq.length > 0 && (
         <section className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-6">
           <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -176,7 +187,81 @@ export default function ToolSEOSection({ seoContent, toolTitle }: ToolSEOSection
         </section>
       )}
 
-      {/* 6. Conclusion */}
+      {/* 6. Internal Linking & Recommended Workflows Chain */}
+      <section className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-6">
+        <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+          <Link2 className="w-5 h-5 shrink-0" />
+          <h3 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
+            {t('seoSection.relatedWorkflows', 'Recommended Tool Workflows & Links')}
+          </h3>
+        </div>
+
+        {/* Workflow Chain */}
+        {currentTool && relatedToolsInChain.length > 0 && (
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 space-y-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              {t('seoSection.suggestedWorkflow', 'Suggested Productivity Chain:')}
+            </span>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <span className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white shadow-xs">
+                {currentTool.title}
+              </span>
+              {relatedToolsInChain.map((relTool) => (
+                <React.Fragment key={relTool.id}>
+                  <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+                  <button
+                    onClick={() => onNavigate && onNavigate(`tool/${relTool.slug}`)}
+                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 transition-colors"
+                  >
+                    {relTool.title}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Categories Cross-Links */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+            <Layers className="w-4 h-4 text-emerald-500" />
+            <span>{t('seoSection.browseCategories', 'Browse Utilities by Category:')}</span>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => onNavigate && onNavigate(`category/${cat.id}`)}
+                className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-950 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200/80 dark:border-slate-800 transition-colors font-medium"
+              >
+                {t(`cat.${cat.id}.name`, cat.name)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Keywords Tags Cloud */}
+        {seoContent.keywords && seoContent.keywords.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <Tag className="w-3.5 h-3.5 text-slate-400" />
+              <span>{t('seoSection.relatedTerms', 'Related Search Terms:')}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {seoContent.keywords.map((kw, i) => (
+                <span
+                  key={i}
+                  className="px-2.5 py-1 rounded-md bg-slate-100/80 dark:bg-slate-950 text-[11px] text-slate-500 dark:text-slate-400 font-medium border border-slate-200/60 dark:border-slate-800"
+                >
+                  #{kw}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 7. Conclusion */}
       {seoContent.conclusion && (
         <section className="p-6 rounded-2xl bg-gradient-to-br from-indigo-50/80 to-slate-50/80 dark:from-slate-900 dark:to-slate-950 border border-indigo-100 dark:border-indigo-950 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line space-y-2">
           <h3 className="font-extrabold text-slate-900 dark:text-white text-base">

@@ -1,8 +1,9 @@
 import { ToolDefinition } from '../types/tool';
 import { ToolSEOContent } from '../types/seoContent';
 import { generateSEOContent } from '../lib/seoEngine';
+import { Language } from '../i18n/translations';
 
-import { aiInvoiceGeneratorSEO } from './tools/ai-invoice-generator';
+import { aiInvoiceGeneratorSEO, getAiInvoiceSEOContent } from './tools/ai-invoice-generator';
 import { qrCodeGeneratorSEO } from './tools/qr-code-generator';
 import { passwordGeneratorSEO } from './tools/password-generator';
 import { uuidGeneratorSEO } from './tools/uuid-generator';
@@ -12,6 +13,10 @@ import { percentageCalculatorSEO } from './tools/percentage-calculator';
 import { bmiCalculatorSEO } from './tools/bmi-calculator';
 import { unitConverterSEO } from './tools/unit-converter';
 import { colorPickerConverterSEO } from './tools/color-picker-converter';
+import { whatsappLinkGeneratorSEO } from './tools/whatsapp-link-generator';
+import { typingSpeedTestSEO } from './tools/typing-speed-test';
+import { pdfCompressorSEO } from './tools/pdf-compressor';
+import { pdfMergerSEO } from './tools/pdf-merger';
 
 /**
  * Custom SEO content registry map for hand-crafted tool content files.
@@ -27,6 +32,10 @@ const CUSTOM_SEO_MAP: Record<string, ToolSEOContent> = {
   'bmi-calculator': bmiCalculatorSEO,
   'unit-converter': unitConverterSEO,
   'color-picker-converter': colorPickerConverterSEO,
+  'whatsapp-link-generator': whatsappLinkGeneratorSEO,
+  'typing-speed-test': typingSpeedTestSEO,
+  'pdf-compressor': pdfCompressorSEO,
+  'pdf-merger': pdfMergerSEO,
 };
 
 /**
@@ -34,14 +43,18 @@ const CUSTOM_SEO_MAP: Record<string, ToolSEOContent> = {
  * Loads dedicated content file if available, or automatically generates complete, unique,
  * compliant SEO content via the automated SEO Engine (enabling seamless scaling to 500+ tools).
  */
-export function getToolSEOContent(tool: ToolDefinition): ToolSEOContent {
-  if (!tool) return generateSEOContent(tool);
+export function getToolSEOContent(tool: ToolDefinition, lang: Language = 'en'): ToolSEOContent {
+  if (!tool) return generateSEOContent(tool, lang);
+
+  if (tool.id === 'ai-invoice-generator' || tool.slug === 'ai-invoice-generator') {
+    return getAiInvoiceSEOContent(lang);
+  }
 
   const customContent = CUSTOM_SEO_MAP[tool.id] || CUSTOM_SEO_MAP[tool.slug];
-  if (customContent) {
+  if (customContent && lang === 'en') {
     return customContent;
   }
 
-  // Fallback to dynamic automated generation engine for scalable 500+ tools
-  return generateSEOContent(tool);
+  // Fallback to dynamic automated generation engine for scalable 500+ tools with language support
+  return generateSEOContent(tool, lang);
 }

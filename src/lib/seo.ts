@@ -14,9 +14,10 @@ export interface SEOData {
 }
 
 export function updateSEO(data: SEOData) {
-  const fullTitle = `${data.title} | NuvoraTools`;
-  const domain = window.location.origin;
-  const canonical = data.canonicalUrl || `${domain}${window.location.pathname}`;
+  const fullTitle = data.title.includes('NuvoraTools') ? data.title : `${data.title} | NuvoraTools`;
+  const canonicalDomain = 'https://nuvoratools.com';
+  const currentPath = data.path !== undefined ? (data.path === '' ? '' : (data.path.startsWith('/') ? data.path : `/${data.path}`)) : window.location.pathname;
+  const canonical = data.canonicalUrl || `${canonicalDomain}${currentPath}`;
 
   // Update Page Title
   document.title = fullTitle;
@@ -51,6 +52,8 @@ export function updateSEO(data: SEOData) {
   }
   setLink('canonical', canonical);
 
+  const imgUrl = data.ogImage || `${canonicalDomain}/pwa-icon.svg`;
+
   // Open Graph
   const ogTitle = data.seoContent?.ogTitle || fullTitle;
   const ogDesc = data.seoContent?.ogDescription || data.description;
@@ -59,7 +62,7 @@ export function updateSEO(data: SEOData) {
   setMeta('property', 'og:type', data.ogType || 'website');
   setMeta('property', 'og:url', canonical);
   setMeta('property', 'og:site_name', 'NuvoraTools');
-  setMeta('property', 'og:image', data.ogImage || `${domain}/pwa-icon.svg`);
+  setMeta('property', 'og:image', imgUrl);
 
   // Twitter Cards
   const twitterTitle = data.seoContent?.twitterTitle || fullTitle;
@@ -67,10 +70,10 @@ export function updateSEO(data: SEOData) {
   setMeta('name', 'twitter:card', 'summary_large_image');
   setMeta('name', 'twitter:title', twitterTitle);
   setMeta('name', 'twitter:description', twitterDesc);
-  setMeta('name', 'twitter:image', data.ogImage || `${domain}/pwa-icon.svg`);
+  setMeta('name', 'twitter:image', imgUrl);
 
   // Inject JSON-LD Structured Data
-  injectJSONLD(data, domain, canonical);
+  injectJSONLD(data, canonicalDomain, canonical);
 }
 
 function injectJSONLD(data: SEOData, domain: string, canonical: string) {

@@ -1,5 +1,9 @@
 import React, { lazy } from 'react';
 import { ToolDefinition, CategoryInfo, ToolCategory } from '../types/tool';
+import { defineTool } from '../tools/templates/defineTool';
+import { getRankedPopularTools } from '../lib/toolAnalytics';
+
+export { getRankedPopularTools };
 
 // Lazy loaded component imports for code splitting and scalable 500+ tools architecture
 const AiInvoiceGenerator = lazy(() => import('../tools/AiInvoiceGenerator'));
@@ -12,6 +16,11 @@ const PercentageCalculator = lazy(() => import('../tools/PercentageCalculator'))
 const BmiCalculator = lazy(() => import('../tools/BmiCalculator'));
 const UnitConverter = lazy(() => import('../tools/UnitConverter'));
 const ColorPickerConverter = lazy(() => import('../tools/ColorPickerConverter'));
+const WhatsAppLinkGenerator = lazy(() => import('../tools/WhatsAppLinkGenerator'));
+const TypingSpeedTest = lazy(() => import('../tools/TypingSpeedTest'));
+const Base64Tool = lazy(() => import('../tools/Base64Tool'));
+const PDFCompressorTool = lazy(() => import('../tools/PDFCompressorTool'));
+const PDFMergerTool = lazy(() => import('../tools/PDFMergerTool'));
 
 export const CATEGORIES: CategoryInfo[] = [
   {
@@ -267,6 +276,82 @@ export const TOOLS_REGISTRY: ToolDefinition[] = [
     relatedToolIds: ['unit-converter', 'qr-code-generator'],
     component: ColorPickerConverter,
   },
+  {
+    id: 'whatsapp-link-generator',
+    slug: 'whatsapp-link-generator',
+    title: 'WhatsApp Link Generator',
+    shortDescription: 'Generate official direct wa.me WhatsApp links with custom messages, country DDI codes, and downloadable QR codes.',
+    category: 'generator',
+    icon: 'MessageCircle',
+    badge: 'Popular',
+    featured: true,
+    tags: ['whatsapp', 'wa.me', 'link', 'generator', 'qr', 'chat', 'message', 'marketing', 'business'],
+    seo: {
+      metaTitle: 'Free WhatsApp Link Generator with Pre-Filled Message & QR Code',
+      metaDescription: 'Create official wa.me WhatsApp links with pre-filled messages, country flags, and vector PNG/SVG QR codes instantly.',
+      keywords: ['whatsapp link generator', 'wa.me generator', 'whatsapp qr code', 'whatsapp direct chat link', 'whatsapp message link'],
+    },
+    faq: [
+      { question: 'Is this WhatsApp link generator free?', answer: 'Yes! You can generate unlimited wa.me links and QR codes completely free.' },
+      { question: 'Is my phone number or message saved on a server?', answer: 'No. All link generation and QR code creation execute locally in your client browser.' },
+      { question: 'Do wa.me links expire?', answer: 'No. Official wa.me links use static WhatsApp URL structures and will work perpetually.' },
+    ],
+    relatedToolIds: ['qr-code-generator', 'ai-invoice-generator', 'word-counter'],
+    component: WhatsAppLinkGenerator,
+  },
+  {
+    id: 'typing-speed-test',
+    slug: 'typing-speed-test',
+    title: 'Typing Speed Test',
+    shortDescription: 'Test your typing speed in WPM & CPM with real-time accuracy, programmer code mode, and historical records.',
+    category: 'developer',
+    icon: 'Keyboard',
+    badge: 'New',
+    featured: true,
+    tags: ['typing', 'wpm', 'speed', 'cpm', 'keyboard', 'test', 'accuracy', 'developer', 'code'],
+    seo: {
+      metaTitle: 'Free Typing Speed Test (WPM & CPM) Online | NuvoraTools',
+      metaDescription: 'Test and improve your typing speed in WPM and CPM with real-time accuracy, code modes, and historical performance tracking.',
+      keywords: ['typing speed test', 'wpm test', 'words per minute', 'cpm test', 'keyboard speed test', 'code typing test'],
+    },
+    faq: [
+      { question: 'Is this typing speed test free?', answer: 'Yes! You can test your typing speed and practice code modes completely free.' },
+      { question: 'How is WPM calculated?', answer: 'WPM is calculated as (Correct Characters / 5) divided by (Time Elapsed in Minutes).' },
+      { question: 'Is my typing data saved on a server?', answer: 'No. All score calculations and history run 100% locally in your browser.' },
+    ],
+    relatedToolIds: ['word-counter', 'uuid-generator', 'lorem-ipsum-generator'],
+    component: TypingSpeedTest,
+  },
+  defineTool({
+    id: 'base64-encoder-decoder',
+    slug: 'base64-encoder-decoder',
+    title: 'Base64 Encoder / Decoder',
+    shortDescription: 'Encode text into Base64 or decode Base64 strings back to text instantly with client-side privacy.',
+    category: 'developer',
+    icon: 'Binary',
+    badge: 'Utility',
+    featured: false,
+    difficulty: 'beginner',
+    popularityScore: 75,
+    tags: ['base64', 'encode', 'decode', 'developer', 'string', 'binary'],
+    component: Base64Tool,
+    relatedToolIds: ['uuid-generator', 'password-generator', 'typing-speed-test'],
+  }),
+  defineTool({
+    id: 'pdf-compressor',
+    slug: 'pdf-compressor',
+    title: 'PDF Compressor',
+    shortDescription: 'Comprima arquivos PDF online e gratuitamente no navegador com privacidade total e níveis personalizados.',
+    category: 'converter',
+    icon: 'FileCheck',
+    badge: 'Popular',
+    featured: true,
+    difficulty: 'beginner',
+    popularityScore: 92,
+    tags: ['pdf', 'compress', 'reduce size', 'pdf size', 'documents', 'converter', 'optimize'],
+    component: PDFCompressorTool,
+    relatedToolIds: ['ai-invoice-generator', 'word-counter', 'unit-converter', 'base64-encoder-decoder'],
+  }),
 ];
 
 export function getAllTools(): ToolDefinition[] {
@@ -312,3 +397,42 @@ export function getRelatedTools(currentToolId: string): ToolDefinition[] {
   // Fallback: tools in same category
   return TOOLS_REGISTRY.filter((t) => t.id !== currentToolId && t.category === current.category).slice(0, 3);
 }
+
+export type ToolGoal = 'documents' | 'media' | 'develop' | 'convert' | 'marketing';
+
+export function getToolsByGoal(goal: ToolGoal): ToolDefinition[] {
+  switch (goal) {
+    case 'documents':
+      return TOOLS_REGISTRY.filter(
+        (t) =>
+          t.category === 'text' ||
+          t.tags.some((tag) => ['invoice', 'pdf', 'billing', 'lorem', 'word', 'text', 'document'].includes(tag))
+      );
+    case 'media':
+      return TOOLS_REGISTRY.filter(
+        (t) =>
+          t.tags.some((tag) => ['qr', 'image', 'color', 'picker', 'hex', 'palette', 'wifi', 'png', 'svg'].includes(tag))
+      );
+    case 'develop':
+      return TOOLS_REGISTRY.filter(
+        (t) =>
+          t.category === 'developer' ||
+          t.tags.some((tag) => ['uuid', 'guid', 'password', 'security', 'code', 'typing', 'wpm', 'developer', 'crypto'].includes(tag))
+      );
+    case 'convert':
+      return TOOLS_REGISTRY.filter(
+        (t) =>
+          t.category === 'converter' ||
+          t.category === 'calculator' ||
+          t.tags.some((tag) => ['unit', 'metric', 'converter', 'percentage', 'bmi', 'color', 'conversion'].includes(tag))
+      );
+    case 'marketing':
+      return TOOLS_REGISTRY.filter(
+        (t) =>
+          t.tags.some((tag) => ['marketing', 'business', 'billing', 'invoice', 'whatsapp', 'wa.me', 'qr', 'finance'].includes(tag))
+      );
+    default:
+      return TOOLS_REGISTRY;
+  }
+}
+
